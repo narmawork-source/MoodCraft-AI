@@ -1,6 +1,7 @@
 import io
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -293,6 +294,24 @@ with st.sidebar:
     chunk_overlap = st.slider("Chunk Overlap", min_value=0, max_value=400, value=150, step=25)
     top_k = st.slider("Retriever Top-K", min_value=2, max_value=12, value=5)
     rebuild_db = st.checkbox("Rebuild Vector DB on ingest", value=False)
+    if st.button("Run LLM Health Check"):
+        if not key_is_usable(api_key):
+            st.error("Set a valid OPENAI API key first.")
+        else:
+            try:
+                start = time.perf_counter()
+                llm = get_llm(api_key)
+                health_resp = llm.invoke("Reply with exactly: HEALTH_OK")
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                out = health_resp.content if hasattr(health_resp, "content") else str(health_resp)
+                if "HEALTH_OK" in out:
+                    st.success(f"LLM reachable. Model={DEFAULT_MODEL}, latency={elapsed_ms:.0f} ms")
+                else:
+                    st.warning(f"LLM reachable but unexpected response: {out}")
+            except Exception as exc:
+                st.error(_safe_error_msg("LLM health check failed", exc))
+                with st.expander("Debug Details"):
+                    st.code(str(exc))
     if st.button("Clear Chat History"):
         st.session_state.doc_chat_history = []
         st.success("Chat history cleared.")
