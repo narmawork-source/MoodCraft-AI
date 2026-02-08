@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual envs
+venv/
+.venv/
+Virtual/
+
+# Secrets
+.env
+
+# Local runtime artifacts
+vector_db_docs/
+analysis_output/
+
+# macOS
+.DS_Store
