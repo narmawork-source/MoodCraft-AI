@@ -22,11 +22,16 @@ st.set_page_config(page_title="Document RAG + QAEval", page_icon="📚", layout=
 st.title("Document RAG + QAEval Dashboard")
 st.caption("Upload documents, chunk with LangChain, store vectors in DB, query with RAG, and evaluate with QAEval")
 
-VECTOR_DB_DIR = Path("vector_db_docs")
+from pathlib import Path
+import os
+
+# Writable location for Streamlit Community Cloud
+VECTOR_DB_DIR = Path(os.getenv("CHROMA_DIR", "/tmp/vector_db_docs"))
 COLLECTION_NAME = "doc_rag_collection"
 DEFAULT_MODEL = "gpt-4.1-mini"
 DEFAULT_EMBED_MODEL = "text-embedding-3-small"
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "25"))
+
 
 
 def resolve_api_key() -> str:
