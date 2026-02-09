@@ -218,13 +218,15 @@ def build_prompt(prompt_mode: str) -> ChatPromptTemplate:
         system_text = (
             "You are a document analyst. Use the retrieved context and chat history to answer. "
             "Reason step-by-step internally, but do not reveal private chain-of-thought. "
-            "Return: (1) concise answer, (2) short rationale, (3) source citations."
+            "If the answer is not in retrieved context, answer from general knowledge and prefix with "
+            "'General Knowledge:'. Return: (1) concise answer, (2) short rationale, (3) source citations "
+            "for document-grounded statements."
         )
     else:
         system_text = (
-            "You are a document analyst. Use only retrieved context and chat history. "
-            "If uncertain, say not found in retrieved context. "
-            "Return concise answer with source citations."
+            "You are a document analyst. Use retrieved context and chat history first. "
+            "If the answer is not in retrieved context, answer from general knowledge and prefix with "
+            "'General Knowledge:'. Return concise answer with source citations for document-grounded statements."
         )
 
     return ChatPromptTemplate.from_messages(
