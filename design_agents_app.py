@@ -3,6 +3,7 @@ import time
 import uuid
 import base64
 import json
+import requests
 from collections import defaultdict
 from datetime import datetime
 from io import BytesIO
@@ -215,6 +216,12 @@ if "last_image_question" not in st.session_state:
     st.session_state.last_image_question = ""
 if "agent_eval_log" not in st.session_state:
     st.session_state.agent_eval_log = []
+if "quick_generated_images" not in st.session_state:
+    st.session_state.quick_generated_images = []
+if "quick_context" not in st.session_state:
+    st.session_state.quick_context = {}
+if "usage_log" not in st.session_state:
+    st.session_state.usage_log = []
 
 IMAGE_VDB_DIR = "moodcraft_image_vdb"
 IMAGE_COLLECTION = "moodcraft_image_chunks"
@@ -323,32 +330,111 @@ def generate_moodboard_image(
     design_type: str,
     style_dna: dict,
     products: list[dict],
+    image_backend: str,
     image_model: str,
     creativity: float,
+    user_intent: str = "",
+    image_context: str = "",
+    hf_token: str = "",
+    variation_note: str = "",
 ) -> bytes:
-    client = OpenAI(api_key=api_key)
+    design_profile = {
+        "Modern": "clean lines, neutral tones, minimal clutter",
+        "Industrial": "raw textures, black metal accents, exposed structure cues",
+        "Contemporary": "soft geometry, layered textures, current trend styling",
+        "Traditional": "classic forms, warm woods, balanced symmetry",
+        "Minimalist": "very simple forms, negative space, restrained palette",
+        "Scandinavian": "light woods, bright airy look, cozy functional decor",
+        "Japandi": "zen minimalism, natural materials, low-profile furniture",
+        "Bohemian": "eclectic textiles, earthy colors, artisanal accessories",
+        "Mid-Century": "tapered legs, walnut/oak tones, iconic retro shapes",
+        "Coastal": "light blues, sandy neutrals, breezy natural textures",
+        "Farmhouse": "rustic wood, cozy fabrics, practical layered decor",
+        "Luxury": "premium finishes, elegant contrast, refined lighting",
+    }.get(design_type, "cohesive interior style")
     top_items = ", ".join([p.get("title", "item") for p in products[:5]])
     palette = ", ".join([p.get("hex", "") for p in style_dna.get("palette", [])[:5]])
     mats = ", ".join(style_dna.get("materials", [])[:5])
     prompt = (
-        "Create a polished interior design moodboard image with product collage layout. "
+        "Create a high-quality photoreal interior render (not text poster). "
         f"Design type: {design_type}. "
+        f"User request: {user_intent or 'interior redesign concept'}. "
+        f"Reference from uploaded image retrieval: {image_context or 'no uploaded reference available'}. "
+        f"Variation directive: {variation_note or 'base concept'}. "
+        f"Design direction details: {design_profile}. "
         f"Style tags: {', '.join(style_dna.get('style_tags', []))}. "
         f"Palette: {palette}. Materials: {mats}. "
-        f"Include visual cues for these items: {top_items}. "
-        "Keep composition clean, premium, and presentation-ready."
+        f"Include these accessories in scene: {top_items}. "
+        "Output a realistic room scene with cohesive furniture, decor, and lighting."
     )
     if creativity >= 0.65:
         prompt += " Explore bolder composition, richer contrast, and more expressive styling details."
     elif creativity <= 0.25:
         prompt += " Keep the layout highly practical, minimal, and conservative."
-    resp = client.images.generate(
-        model=image_model,
-        prompt=prompt,
-        size="1024x1024",
-    )
+    if image_backend == "Diffusion (HF SDXL)":
+        if not hf_token:
+            raise ValueError("HF token is required for Diffusion backend.")
+        headers = {"Authorization": f"Bearer {hf_token}"}
+        payload = {
+            "inputs": prompt,
+            "parameters": {
+                "guidance_scale": 8.0,
+                "num_inference_steps": 35,
+                "negative_prompt": "blurry, low quality, distorted, text overlay, watermark",
+            },
+        }
+        resp = requests.post(
+            "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0",
+            headers=headers,
+            json=payload,
+            timeout=120,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"HF diffusion failed: {resp.status_code} {resp.text[:200]}")
+        return resp.content
+
+    client = OpenAI(api_key=api_key)
+    resp = client.images.generate(model=image_model, prompt=prompt, size="1024x1024")
     b64 = resp.data[0].b64_json
     return base64.b64decode(b64)
+
+
+def generate_image_variants(
+    count: int,
+    api_key: str,
+    design_type: str,
+    style_dna: dict,
+    products: list[dict],
+    image_backend: str,
+    image_model: str,
+    creativity: float,
+    user_intent: str,
+    image_context: str,
+    hf_token: str,
+) -> list[bytes]:
+    notes = [
+        "layout variant A, balanced composition",
+        "layout variant B, alternative furniture placement",
+        "layout variant C, alternate decor emphasis",
+    ]
+    out: list[bytes] = []
+    for i in range(count):
+        out.append(
+            generate_moodboard_image(
+                api_key=api_key,
+                design_type=design_type,
+                style_dna=style_dna,
+                products=products,
+                image_backend=image_backend,
+                image_model=image_model,
+                creativity=creativity,
+                user_intent=user_intent,
+                image_context=image_context,
+                hf_token=hf_token,
+                variation_note=notes[i % len(notes)],
+            )
+        )
+    return out
 
 
 def trace(tool: str, ok: bool, ms: int, err: str = ""):
@@ -491,9 +577,16 @@ def render_feedback_controls(scope: str, question: str, answer: str):
 
 with st.sidebar:
     st.subheader("Control Center")
-    app_view = st.radio("App View", ["Simple", "Advanced"], index=0)
     api_key = st.text_input("OpenAI API Key", value=os.getenv("OPENAI_API_KEY", ""), type="password")
     with st.expander("Settings", expanded=True):
+        image_backend = st.selectbox("Image Backend", ["OpenAI", "Diffusion (HF SDXL)"], index=0)
+        hf_token = st.text_input(
+            "HuggingFace API Token (for diffusion backend)",
+            value=os.getenv("HF_API_TOKEN", ""),
+            type="password",
+        )
+        if image_backend == "Diffusion (HF SDXL)" and not hf_token:
+            st.caption("Add HF token to use diffusion backend.")
         llm_model = st.selectbox(
             "LLM Model",
             ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"],
@@ -520,34 +613,37 @@ with st.sidebar:
                 "Industrial",
                 "Contemporary",
                 "Traditional",
+                "Minimalist",
+                "Scandinavian",
+                "Japandi",
+                "Bohemian",
+                "Mid-Century",
+                "Coastal",
+                "Farmhouse",
+                "Luxury",
             ],
             index=0,
         )
         budget_min, budget_max = st.slider("Budget Range", 20, 1500, (100, 400), step=10)
-        decor_text = st.text_input("Decor Types (comma)", value="rug,lamp,console")
+        decor_options = [
+            "rug",
+            "lamp",
+            "console",
+            "chair",
+            "sofa",
+            "coffee table",
+            "wall art",
+            "curtains",
+            "mirror",
+            "plants",
+            "storage",
+        ]
+        selected_decor_types = st.multiselect(
+            "Decor Types",
+            options=decor_options,
+            default=["rug", "lamp", "console"],
+        )
         auto_qaeval = st.checkbox("Auto QAEval", value=True)
-
-    if app_view == "Simple":
-        current_section = st.selectbox(
-            "Section",
-            ["Quick Design Studio", "Meet Our Agents", "How It Works & Architecture"],
-            index=0,
-        )
-    else:
-        current_section = st.selectbox(
-            "Section",
-            [
-                "Quick Design Studio",
-                "Meet Our Agents",
-                "How It Works & Architecture",
-                "Agent 1: Style",
-                "Agent 2: Retail",
-                "Agent 3: Moodboard",
-                "QAEval + Trace",
-                "Image KB + Agent Chat",
-            ],
-            index=0,
-        )
 
     st.markdown("---")
     st.markdown("**Workflow**")
@@ -562,7 +658,9 @@ retail_avatar_uri = load_avatar_data_uri("design_agents/assets/retail_avatar.svg
 board_avatar_uri = load_avatar_data_uri("design_agents/assets/board_avatar.svg")
 orchestrator_avatar_uri = load_avatar_data_uri("design_agents/assets/orchestrator_avatar.svg")
 
-if current_section == "Quick Design Studio":
+tab_design, tab_diag, tab_agents = st.tabs(["Design Studio", "Diagnostics", "Meet Agents"])
+
+with tab_design:
     st.subheader("Quick Design Studio")
     st.caption("Simple flow: upload your room image, tell us what you want, and get a generated room concept plus accessories.")
 
@@ -594,56 +692,127 @@ if current_section == "Quick Design Studio":
                 matched_image = matches[0]["image_name"] if matches else "none"
                 style_seed = f"design_type={design_type}. prompt={q_prompt}. matched_image={matched_image}"
                 style_dna = analyze_style_dna(style_seed)
-                decor = style_dna.get("decor_types", ["rug", "lamp", "console", "chair"])
+                decor = selected_decor_types or style_dna.get("decor_types", ["rug", "lamp", "console", "chair"])
                 products = search_products(style_dna, decor, budget_min, budget_max)
                 board = compose_moodboard(style_dna, products)
 
-                with st.spinner("Generating your new design image..."):
-                    img_bytes = generate_moodboard_image(
+                with st.spinner("Generating 3 design options..."):
+                    quick_images = generate_image_variants(
+                        count=3,
                         api_key=api_key,
                         design_type=design_type,
                         style_dna=style_dna,
                         products=products,
+                        image_backend=image_backend,
                         image_model=image_model,
                         creativity=q_creativity,
+                        user_intent=q_prompt,
+                        image_context=f"best_match={matched_image}; scores={matches[:3]}" if matches else "no match",
+                        hf_token=hf_token,
                     )
 
-                st.markdown("### Your New Room Concept")
-                st.image(img_bytes, caption=f"Generated concept for: {q_prompt}", use_container_width=True)
-                st.download_button(
-                    "Download Generated Image",
-                    data=img_bytes,
-                    file_name="quick_design_concept.png",
-                    mime="image/png",
-                    use_container_width=True,
-                )
-
-                if matches:
-                    st.markdown("### Closest Match From Your Uploaded Images")
-                    st.dataframe(pd.DataFrame(matches), use_container_width=True)
-
-                st.markdown("### Accessories Needed (With Shopping Links & Pricing)")
-                if products:
-                    prod_df = pd.DataFrame(products)[["title", "retailer", "price", "match_score", "url"]]
-                    st.dataframe(prod_df, use_container_width=True)
-                    for p in products[:6]:
-                        st.markdown(
-                            f"- **{p['title']}** | {p['retailer']} | `${p['price']}` | [Buy Link]({p['url']})"
-                        )
-                else:
-                    st.warning("No products found in selected budget range. Increase the budget range in sidebar.")
-
-                st.markdown("### Agent Summary")
-                st.write(
-                    f"Style Agent identified: {', '.join(style_dna.get('style_tags', []))}. "
-                    f"Retail Agent sourced {len(products)} items. "
-                    f"Moodboard Agent prepared {len(board.get('board_items', []))} placements."
+                st.session_state.quick_generated_images = quick_images
+                st.session_state.quick_context = {
+                    "prompt": q_prompt,
+                    "matches": matches,
+                    "matched_image": matched_image,
+                    "style_dna": style_dna,
+                    "products": products,
+                    "board": board,
+                }
+                st.session_state.usage_log.append(
+                    {
+                        "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                        "prompt": q_prompt,
+                        "design_type": design_type,
+                        "decor_types": ", ".join(decor),
+                        "product_count": len(products),
+                        "top_product": products[0]["title"] if products else "",
+                    }
                 )
 
             except Exception as exc:
                 st.error(f"Quick design generation failed: {exc}")
 
-if current_section == "Meet Our Agents":
+    if st.session_state.quick_generated_images:
+        qctx = st.session_state.quick_context
+        st.markdown("### Your New Room Concepts (3 Options)")
+        img_cols = st.columns(3)
+        for i, img_bytes in enumerate(st.session_state.quick_generated_images):
+            with img_cols[i]:
+                st.image(img_bytes, caption=f"Option {i + 1}: {qctx.get('prompt', '')}", use_container_width=True)
+                st.download_button(
+                    f"Download Option {i + 1}",
+                    data=img_bytes,
+                    file_name=f"quick_design_option_{i + 1}.png",
+                    mime="image/png",
+                    use_container_width=True,
+                    key=f"quick_download_{i}",
+                )
+                c_up, c_down = st.columns(2)
+                with c_up:
+                    if st.button("👍", key=f"quick_img_up_{i}", use_container_width=True):
+                        st.session_state.feedback_log.append(
+                            {
+                                "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                                "scope": "quick_image_gallery",
+                                "question": qctx.get("prompt", ""),
+                                "answer": f"option_{i+1}",
+                                "feedback": "up",
+                            }
+                        )
+                with c_down:
+                    if st.button("👎", key=f"quick_img_down_{i}", use_container_width=True):
+                        st.session_state.feedback_log.append(
+                            {
+                                "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                                "scope": "quick_image_gallery",
+                                "question": qctx.get("prompt", ""),
+                                "answer": f"option_{i+1}",
+                                "feedback": "down",
+                            }
+                        )
+
+        favorite = st.radio("Pick your favorite image option", ["Option 1", "Option 2", "Option 3"], horizontal=True)
+        if st.button("Save Favorite", use_container_width=False, key="quick_favorite_btn"):
+            st.session_state.feedback_log.append(
+                {
+                    "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                    "scope": "quick_image_gallery",
+                    "question": qctx.get("prompt", ""),
+                    "answer": favorite.lower().replace(" ", "_"),
+                    "feedback": "favorite",
+                }
+            )
+            st.success(f"Saved {favorite} as favorite.")
+
+        matches = qctx.get("matches", [])
+        if matches:
+            st.markdown("### Closest Match From Your Uploaded Images")
+            st.dataframe(pd.DataFrame(matches), use_container_width=True)
+
+        products = qctx.get("products", [])
+        board = qctx.get("board", {})
+        style_dna = qctx.get("style_dna", {})
+        st.markdown("### Accessories Needed (With Shopping Links & Pricing)")
+        if products:
+            prod_df = pd.DataFrame(products)[["title", "retailer", "price", "match_score", "url"]]
+            st.dataframe(prod_df, use_container_width=True)
+            for p in products[:6]:
+                st.markdown(
+                    f"- **{p['title']}** | {p['retailer']} | `${p['price']}` | [Buy Link]({p['url']})"
+                )
+        else:
+            st.warning("No products found in selected budget range. Increase the budget range in sidebar.")
+
+        st.markdown("### Agent Summary")
+        st.write(
+            f"Style Agent identified: {', '.join(style_dna.get('style_tags', []))}. "
+            f"Retail Agent sourced {len(products)} items. "
+            f"Moodboard Agent prepared {len(board.get('board_items', []))} placements."
+        )
+
+with tab_agents:
     st.subheader("Meet Our Agents")
     st.caption("Each agent has a focused role and they collaborate to produce a complete interior design recommendation.")
 
@@ -732,7 +901,7 @@ if current_section == "Meet Our Agents":
     st.write("3. Moodboard Composer builds a cohesive concept and presentation.")
     st.write("4. Orchestrator answers user questions and tracks quality with QAEval + feedback.")
 
-if current_section == "How It Works & Architecture":
+if False:
     st.subheader("How It Works & Architecture")
     st.caption("Technical overview of models, agent roles, MCP interfaces, and full data flow.")
 
@@ -740,7 +909,8 @@ if current_section == "How It Works & Architecture":
     with c1:
         st.markdown("### Models Used")
         st.write(f"- LLM (configurable): `{llm_model}`")
-        st.write(f"- Image generation (configurable): `{image_model}`")
+        st.write(f"- Image backend (configurable): `{image_backend}`")
+        st.write(f"- Image generation model (OpenAI mode): `{image_model}`")
         st.write("- Image/text embeddings: `text-embedding-3-small`")
         st.write("- QAEval judge model: `gpt-4.1-mini`")
         st.write("- Live web search model: uses selected LLM model with web search tool")
@@ -797,7 +967,7 @@ if current_section == "How It Works & Architecture":
         language="text",
     )
 
-if current_section == "Agent 1: Style":
+if False:
     st.subheader("Style Interpreter")
     prompt = st.text_input("Design Prompt", value=f"cozy {design_type.lower()} living room")
     if st.button("Run Style Interpreter", use_container_width=True):
@@ -810,14 +980,14 @@ if current_section == "Agent 1: Style":
     if st.session_state.style_dna:
         render_style_dna(st.session_state.style_dna)
 
-if current_section == "Agent 2: Retail":
+if False:
     st.subheader("Retail Sourcing")
     if st.button("Run Retail Sourcing", use_container_width=True):
         dna = st.session_state.style_dna
         if not dna:
             st.error("Run Agent 1 first.")
         else:
-            decor = [x.strip() for x in decor_text.split(",") if x.strip()]
+            decor = selected_decor_types or ["rug", "lamp", "console"]
             started = time.perf_counter()
             products = search_products(dna, decor, budget_min, budget_max)
             elapsed = int((time.perf_counter() - started) * 1000)
@@ -827,7 +997,7 @@ if current_section == "Agent 2: Retail":
     if st.session_state.products:
         render_products(st.session_state.products)
 
-if current_section == "Agent 3: Moodboard":
+if False:
     st.subheader("Moodboard Composer")
     if st.button("Run Moodboard Composer", use_container_width=True):
         dna = st.session_state.style_dna
@@ -858,8 +1028,12 @@ if current_section == "Agent 3: Moodboard":
                     design_type=design_type,
                     style_dna=st.session_state.style_dna,
                     products=st.session_state.products,
+                    image_backend=image_backend,
                     image_model=image_model,
                     creativity=creativity_level,
+                    user_intent=f"{design_type} interior moodboard",
+                    image_context="manual moodboard generation tab",
+                    hf_token=hf_token,
                 )
                 st.session_state.generated_board_image = img_bytes
                 st.success("Moodboard image generated.")
@@ -875,8 +1049,19 @@ if current_section == "Agent 3: Moodboard":
             mime="image/png",
         )
 
-if current_section == "QAEval + Trace":
+with tab_diag:
     st.subheader("Q&A + Automated QAEval")
+    if st.session_state.usage_log:
+        udf = pd.DataFrame(st.session_state.usage_log)
+        up_count = len(udf)
+        avg_products = float(udf["product_count"].mean()) if "product_count" in udf.columns else 0.0
+        top_design = udf["design_type"].value_counts().idxmax() if "design_type" in udf.columns else "N/A"
+        top_product = udf["top_product"].value_counts().idxmax() if "top_product" in udf.columns and len(udf["top_product"].dropna()) else "N/A"
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Design Requests", up_count)
+        k2.metric("Avg Products/Request", f"{avg_products:.1f}")
+        k3.metric("Top Design Type", top_design)
+        k4.metric("Most Suggested Product", top_product)
     question = st.text_input("Ask a design question")
     if st.button("Ask", use_container_width=True):
         if not api_key:
@@ -983,7 +1168,7 @@ if current_section == "QAEval + Trace":
             )
             st.dataframe(by_scope, use_container_width=True)
 
-if current_section == "Image KB + Agent Chat":
+if False:
     st.subheader("Image Upload + Vector Search + Agent Conversation")
     st.caption("Upload images, chunk into tiles, store in vector DB, then chat to match image vibe and generate moodboard.")
     enable_live_web = st.checkbox("Enable Live Web Search in this tab", value=False)
@@ -1045,7 +1230,7 @@ if current_section == "Image KB + Agent Chat":
                     style_seed = f"{image_prompt}. matched_image={best_image}. question={chat_q}"
                     style_seed = f"design_type={design_type}. {style_seed}"
                     style_dna = analyze_style_dna(style_seed)
-                    decor = style_dna.get("decor_types", ["rug", "lamp", "console"])
+                    decor = selected_decor_types or style_dna.get("decor_types", ["rug", "lamp", "console"])
                     products = search_products(style_dna, decor, budget_min, budget_max)
                     board = compose_moodboard(style_dna, products)
 
