@@ -774,7 +774,7 @@ retail_avatar_uri = load_avatar_data_uri("design_agents/assets/retail_avatar.svg
 board_avatar_uri = load_avatar_data_uri("design_agents/assets/board_avatar.svg")
 orchestrator_avatar_uri = load_avatar_data_uri("design_agents/assets/orchestrator_avatar.svg")
 
-tab_design, tab_diag, tab_agents = st.tabs(["Design Studio", "Diagnostics", "About & Architecture"])
+tab_design, tab_diag, tab_agents, tab_arch = st.tabs(["Design Studio", "Diagnostics", "Meet the Agents", "Architecture"])
 
 with tab_design:
     st.subheader("Quick Design Studio")
@@ -954,77 +954,88 @@ with tab_design:
             st.dataframe(pd.DataFrame(qctx["agent_messages"]), use_container_width=True)
 
 with tab_agents:
-    st.subheader("About & Architecture")
-    st.caption("How the 3-agent system is built, how agents talk to each other, and how final output is produced.")
+    st.subheader("Meet the Agents")
+    st.caption("Simple explanation of who does what and how they work together to design your room.")
 
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("### Models")
-        st.write(f"- Orchestrator/Agent model: `{llm_model}`")
-        st.write(f"- Image backend: `{image_backend}`")
-        st.write(f"- Image model (OpenAI mode): `{image_model}`")
-        st.write("- Embeddings for image KB: `text-embedding-3-small`")
-        st.write("- QAEval model: `gpt-4.1-mini`")
-        st.markdown("### MCP/Tooling")
-        st.write("- `mcp_style_server.py` for style tool surface")
-        st.write("- `mcp_retail_server.py` for retail tool surface")
-        st.write("- `mcp_board_server.py` for board tool surface")
-        st.write("- Streamlit app orchestrates tool calls and response synthesis")
-    with c2:
-        st.markdown("### 3-Agent Conversation Contract (JSON)")
-        st.code(
-            "{\n"
-            '  "vision": {"style_cues": [], "constraints": []},\n'
-            '  "style": {"target_style": "", "avoid": []},\n'
-            '  "retail": {"categories": [], "retailer_queries": []},\n'
-            '  "synthesis": {"final_design_brief": "", "resolved_conflicts": []}\n'
-            "}",
-            language="json",
+        st.markdown('<div class="mc-card">', unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="mc-agent-head">
+              <img class="mc-avatar" src="{style_avatar_uri}" alt="Vision Agent Avatar" />
+              <h3 style="margin:0">1) Vision Agent</h3>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
+        st.write("Looks at your uploaded room image and understands what is already in the room.")
+        st.write("Finds visual cues like style, colors, and space limitations.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("### Architecture Highlighter")
+    with c2:
+        st.markdown('<div class="mc-card">', unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="mc-agent-head">
+              <img class="mc-avatar" src="{retail_avatar_uri}" alt="Style Agent Avatar" />
+              <h3 style="margin:0">2) Style Agent</h3>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.write("Understands your request (for example: 'modern pooja room').")
+        st.write("Creates a clear style plan including what to include and avoid.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    c3, c4 = st.columns(2)
+    with c3:
+        st.markdown('<div class="mc-card">', unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="mc-agent-head">
+              <img class="mc-avatar" src="{board_avatar_uri}" alt="Retail Agent Avatar" />
+              <h3 style="margin:0">3) Retail Curator Agent</h3>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.write("Builds the shopping list based on your style and budget.")
+        st.write("Returns accessories with price and links that match your room direction.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with c4:
+        st.markdown('<div class="mc-card">', unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="mc-agent-head">
+              <img class="mc-avatar" src="{orchestrator_avatar_uri}" alt="Finalizer Agent Avatar" />
+              <h3 style="margin:0">4) Finalizer Agent</h3>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.write("Combines all agent inputs and decides the final design direction.")
+        st.write("Generates 3 image options and final recommendations.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("### How They Talk to Each Other")
     st.markdown(
         """
         <div class="mc-arch">
-          <b>1) User Input</b>: prompt + uploaded room images + controls<br/>
-          <b>2) Retrieval</b>: image chunking -> embedding -> vector match context<br/>
-          <b>3) Agent Conversation</b>: Vision -> Style -> Retail Curator -> Synthesis<br/>
-          <b>4) Generation</b>: produce 3 room-image variants + accessories list<br/>
-          <b>5) Diagnostics</b>: QAEval, agent ranking, usage KPIs, thumbs feedback
+          You upload image + prompt -> Vision Agent reads the room -> Style Agent defines the direction -> 
+          Retail Agent picks matching items in budget -> Finalizer Agent combines everything and creates final outputs.
         </div>
         """,
         unsafe_allow_html=True,
     )
-    st.markdown("### Inter-Agent Message Flow")
-    st.code(
-        "Vision Agent JSON -> Style Agent JSON -> Retail Curator JSON -> Synthesis JSON -> Final Brief",
-        language="text",
-    )
-    st.markdown("### Budget & Creativity Flow")
-    st.markdown(
-        """
-        <div class="mc-arch">
-          <b>Budget (Retail Step)</b><br/>
-          1) User selects budget range in sidebar.<br/>
-          2) Budget is passed into the 3-agent consensus pipeline.<br/>
-          3) Retail sourcing filters products strictly within min/max range.<br/>
-          4) Filtered products are used for checklist, links, and image context.
-          <br/><br/>
-          <b>Creativity (Generation + LLM Style)</b><br/>
-          1) User sets creativity level (global + quick-flow slider).<br/>
-          2) Creativity modifies image prompt style (conservative vs expressive).<br/>
-          3) Same creativity is used as LLM temperature for answer tone/variation.<br/>
-          4) Higher creativity explores bolder alternatives; lower creativity keeps practical output.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    if st.session_state.quick_context.get("agent_messages"):
-        st.markdown("### Latest Run: Agent Messages")
-        st.dataframe(pd.DataFrame(st.session_state.quick_context["agent_messages"]), use_container_width=True)
 
-if False:
-    st.subheader("How It Works & Architecture")
+    st.markdown("### How Budget and Creativity Affect Results")
+    st.write("- Budget controls which products are selected.")
+    st.write("- Creativity controls how bold or practical the generated images look.")
+
+with tab_arch:
+    st.subheader("Architecture")
     st.caption("Technical overview of models, agent roles, MCP interfaces, and full data flow.")
 
     c1, c2 = st.columns(2)
