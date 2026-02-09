@@ -7,6 +7,7 @@ import requests
 from collections import defaultdict
 from datetime import datetime
 from io import BytesIO
+from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -53,16 +54,6 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
   padding: 1.6rem 1.5rem;
   margin-bottom: 1rem;
   box-shadow: 0 12px 30px rgba(21,31,58,.18);
-}
-.mc-badge {
-  display: inline-block;
-  background: rgba(255,255,255,.2);
-  border: 1px solid rgba(255,255,255,.4);
-  color: #ffffff;
-  border-radius: 999px;
-  padding: .2rem .7rem;
-  font-size: .78rem;
-  margin-bottom: .5rem;
 }
 .mc-title { color: #ffffff; font-size: 2.2rem; font-weight: 700; margin: 0; letter-spacing: .2px; }
 .mc-sub { color: #e7eefb; margin-top: .35rem; max-width: 700px; }
@@ -160,7 +151,6 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
 st.markdown(
     """
 <div class="mc-hero">
-  <span class="mc-badge">Canva-Style Template</span>
   <p class="mc-title">MoodCraft AI</p>
   <p class="mc-sub">Three-agent interior design copilot that analyzes your room, sources products, composes moodboards, and measures quality with QAEval.</p>
   <div class="mc-kpis">
@@ -467,6 +457,132 @@ def eval_answer(api_key: str, question: str, reference: str, prediction: str) ->
     return {"grade": grade, "reason": txt}
 
 
+def parse_json_response(text: str) -> dict[str, Any]:
+    t = (text or "").strip()
+    if t.startswith("```"):
+        t = t.strip("`")
+        if t.lower().startswith("json"):
+            t = t[4:].strip()
+    return json.loads(t)
+
+
+def llm_json_step(api_key: str, llm_model: str, role: str, schema_hint: str, payload: dict, fallback: dict) -> dict:
+    try:
+        llm = ChatOpenAI(model=llm_model, temperature=0, api_key=api_key)
+        prompt = (
+            f"You are {role}. Return strict JSON only. No markdown.\n"
+            f"Schema hint: {schema_hint}\n"
+            f"Input payload: {json.dumps(payload)}"
+        )
+        raw = llm.invoke(prompt).content
+        return parse_json_response(raw)
+    except Exception:
+        return fallback
+
+
+def run_three_agent_consensus(
+    api_key: str,
+    llm_model: str,
+    user_prompt: str,
+    design_type: str,
+    image_matches: list[dict],
+    selected_decor_types: list[str],
+    budget_min: int,
+    budget_max: int,
+) -> dict:
+    vision_fallback = {
+        "style_cues": [design_type.lower(), "natural_textures"],
+        "palette_detected": ["#f5f1ea", "#d8c9b1", "#8b6f47"],
+        "constraints": ["respect uploaded image composition"],
+        "existing_items": ["current furniture"],
+    }
+    vision = llm_json_step(
+        api_key=api_key,
+        llm_model=llm_model,
+        role="Vision Agent",
+        schema_hint='{"style_cues":[],"palette_detected":[],"constraints":[],"existing_items":[]}',
+        payload={"user_prompt": user_prompt, "image_matches": image_matches[:5], "design_type": design_type},
+        fallback=vision_fallback,
+    )
+
+    style_fallback = {
+        "target_style": design_type.lower(),
+        "must_keep": [],
+        "avoid": ["clutter"],
+        "do": ["cohesive styling", "balanced layout"],
+        "budget": {"min": budget_min, "max": budget_max},
+    }
+    style = llm_json_step(
+        api_key=api_key,
+        llm_model=llm_model,
+        role="Style Agent",
+        schema_hint='{"target_style":"","must_keep":[],"avoid":[],"do":[],"budget":{"min":0,"max":0}}',
+        payload={"user_prompt": user_prompt, "vision": vision, "design_type": design_type, "budget": [budget_min, budget_max]},
+        fallback=style_fallback,
+    )
+
+    retail_fallback = {
+        "categories": selected_decor_types or ["rug", "lamp", "console"],
+        "material_preferences": ["oak", "linen"],
+        "size_constraints": {},
+        "retailer_queries": [f"{design_type} decor under budget"],
+        "alternatives": {},
+    }
+    retail = llm_json_step(
+        api_key=api_key,
+        llm_model=llm_model,
+        role="Retail Curator Agent",
+        schema_hint='{"categories":[],"material_preferences":[],"size_constraints":{},"retailer_queries":[],"alternatives":{}}',
+        payload={"vision": vision, "style": style, "user_prompt": user_prompt},
+        fallback=retail_fallback,
+    )
+
+    style_seed = f"{design_type} {user_prompt} {style.get('target_style', design_type)} {' '.join(vision.get('style_cues', []))}"
+    style_dna = analyze_style_dna(style_seed)
+    decor = selected_decor_types or retail.get("categories", []) or style_dna.get("decor_types", ["rug", "lamp", "console"])
+    products = search_products(style_dna, decor, budget_min, budget_max)
+    board = compose_moodboard(style_dna, products)
+
+    synthesis_fallback = {
+        "final_design_brief": f"{design_type} direction aligned to uploaded room context and prompt.",
+        "resolved_conflicts": ["balanced minimal styling and essential decor only"],
+        "shopping_checklist": decor[:6],
+        "recommended_direction": "Option with strongest style-context match",
+    }
+    synthesis = llm_json_step(
+        api_key=api_key,
+        llm_model=llm_model,
+        role="Synthesis Agent",
+        schema_hint='{"final_design_brief":"","resolved_conflicts":[],"shopping_checklist":[],"recommended_direction":""}',
+        payload={
+            "vision": vision,
+            "style": style,
+            "retail": retail,
+            "products": products[:6],
+            "board": board,
+        },
+        fallback=synthesis_fallback,
+    )
+
+    messages = [
+        {"agent": "Vision Agent", "message": f"Detected cues={vision.get('style_cues', [])}, constraints={vision.get('constraints', [])}"},
+        {"agent": "Style Agent", "message": f"Target={style.get('target_style', design_type)}, avoid={style.get('avoid', [])}"},
+        {"agent": "Retail Curator Agent", "message": f"Categories={retail.get('categories', decor)}, queries={retail.get('retailer_queries', [])[:2]}"},
+        {"agent": "Synthesis Agent", "message": f"Brief={synthesis.get('final_design_brief', '')}"},
+    ]
+    return {
+        "vision": vision,
+        "style": style,
+        "retail": retail,
+        "synthesis": synthesis,
+        "style_dna": style_dna,
+        "products": products,
+        "board": board,
+        "decor": decor,
+        "agent_messages": messages,
+    }
+
+
 def evaluate_agents(api_key: str, llm_model: str, question: str, style_dna: dict, products: list, board: dict, final_answer: str) -> dict:
     llm = ChatOpenAI(model=llm_model, temperature=0, api_key=api_key)
     prompt = (
@@ -658,7 +774,7 @@ retail_avatar_uri = load_avatar_data_uri("design_agents/assets/retail_avatar.svg
 board_avatar_uri = load_avatar_data_uri("design_agents/assets/board_avatar.svg")
 orchestrator_avatar_uri = load_avatar_data_uri("design_agents/assets/orchestrator_avatar.svg")
 
-tab_design, tab_diag, tab_agents = st.tabs(["Design Studio", "Diagnostics", "Meet Agents"])
+tab_design, tab_diag, tab_agents = st.tabs(["Design Studio", "Diagnostics", "About & Architecture"])
 
 with tab_design:
     st.subheader("Quick Design Studio")
@@ -690,11 +806,25 @@ with tab_design:
                     matches = retrieve_image_matches(vs, q_prompt, top_k=8)
 
                 matched_image = matches[0]["image_name"] if matches else "none"
-                style_seed = f"design_type={design_type}. prompt={q_prompt}. matched_image={matched_image}"
-                style_dna = analyze_style_dna(style_seed)
-                decor = selected_decor_types or style_dna.get("decor_types", ["rug", "lamp", "console", "chair"])
-                products = search_products(style_dna, decor, budget_min, budget_max)
-                board = compose_moodboard(style_dna, products)
+                pipeline = run_three_agent_consensus(
+                    api_key=api_key,
+                    llm_model=llm_model,
+                    user_prompt=q_prompt,
+                    design_type=design_type,
+                    image_matches=matches,
+                    selected_decor_types=selected_decor_types,
+                    budget_min=budget_min,
+                    budget_max=budget_max,
+                )
+                style_dna = pipeline["style_dna"]
+                products = pipeline["products"]
+                board = pipeline["board"]
+                decor = pipeline["decor"]
+                synthesis = pipeline["synthesis"]
+                agent_messages = pipeline["agent_messages"]
+                st.session_state.style_dna = style_dna
+                st.session_state.products = products
+                st.session_state.board = board
 
                 with st.spinner("Generating 3 design options..."):
                     quick_images = generate_image_variants(
@@ -719,6 +849,8 @@ with tab_design:
                     "style_dna": style_dna,
                     "products": products,
                     "board": board,
+                    "agent_messages": agent_messages,
+                    "synthesis": synthesis,
                 }
                 st.session_state.usage_log.append(
                     {
@@ -728,6 +860,7 @@ with tab_design:
                         "decor_types": ", ".join(decor),
                         "product_count": len(products),
                         "top_product": products[0]["title"] if products else "",
+                        "conflict_count": len(synthesis.get("resolved_conflicts", [])),
                     }
                 )
 
@@ -811,95 +944,84 @@ with tab_design:
             f"Retail Agent sourced {len(products)} items. "
             f"Moodboard Agent prepared {len(board.get('board_items', []))} placements."
         )
+        if qctx.get("synthesis"):
+            st.markdown("### Final Design Brief (Consensus)")
+            st.write(qctx["synthesis"].get("final_design_brief", ""))
+            if qctx["synthesis"].get("resolved_conflicts"):
+                st.write(f"Resolved conflicts: {qctx['synthesis'].get('resolved_conflicts', [])}")
+        if qctx.get("agent_messages"):
+            st.markdown("### Agent-to-Agent Conversation")
+            st.dataframe(pd.DataFrame(qctx["agent_messages"]), use_container_width=True)
 
 with tab_agents:
-    st.subheader("Meet Our Agents")
-    st.caption("Each agent has a focused role and they collaborate to produce a complete interior design recommendation.")
+    st.subheader("About & Architecture")
+    st.caption("How the 3-agent system is built, how agents talk to each other, and how final output is produced.")
 
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown('<div class="mc-card">', unsafe_allow_html=True)
-        st.markdown(
-            f"""
-            <div class="mc-agent-head">
-              <img class="mc-avatar" src="{style_avatar_uri}" alt="Style Agent Avatar" />
-              <h3 style="margin:0">Agent 1: Style Interpreter</h3>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.write("**Persona:** Visual Design Strategist")
-        st.write("**Mission:** Understand room photos and user intent to build structured design DNA.")
-        st.write("**What it does:**")
-        st.write("- Extracts style tags (modern, industrial, traditional, etc.)")
-        st.write("- Builds palette and material direction")
-        st.write("- Identifies decor types and do/don't constraints")
-        st.markdown("</div>", unsafe_allow_html=True)
-
+        st.markdown("### Models")
+        st.write(f"- Orchestrator/Agent model: `{llm_model}`")
+        st.write(f"- Image backend: `{image_backend}`")
+        st.write(f"- Image model (OpenAI mode): `{image_model}`")
+        st.write("- Embeddings for image KB: `text-embedding-3-small`")
+        st.write("- QAEval model: `gpt-4.1-mini`")
+        st.markdown("### MCP/Tooling")
+        st.write("- `mcp_style_server.py` for style tool surface")
+        st.write("- `mcp_retail_server.py` for retail tool surface")
+        st.write("- `mcp_board_server.py` for board tool surface")
+        st.write("- Streamlit app orchestrates tool calls and response synthesis")
     with c2:
-        st.markdown('<div class="mc-card">', unsafe_allow_html=True)
-        st.markdown(
-            f"""
-            <div class="mc-agent-head">
-              <img class="mc-avatar" src="{retail_avatar_uri}" alt="Retail Agent Avatar" />
-              <h3 style="margin:0">Agent 2: Retail Sourcing</h3>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        st.markdown("### 3-Agent Conversation Contract (JSON)")
+        st.code(
+            "{\n"
+            '  "vision": {"style_cues": [], "constraints": []},\n'
+            '  "style": {"target_style": "", "avoid": []},\n'
+            '  "retail": {"categories": [], "retailer_queries": []},\n'
+            '  "synthesis": {"final_design_brief": "", "resolved_conflicts": []}\n'
+            "}",
+            language="json",
         )
-        st.write("**Persona:** Budget-Conscious Product Curator")
-        st.write("**Mission:** Convert style DNA into practical, purchasable product recommendations.")
-        st.write("**What it does:**")
-        st.write("- Selects products by decor type and budget")
-        st.write("- Prioritizes style fit and cost")
-        st.write("- Returns ranked product options with links")
-        st.markdown("</div>", unsafe_allow_html=True)
 
-    c3, c4 = st.columns(2)
-    with c3:
-        st.markdown('<div class="mc-card">', unsafe_allow_html=True)
-        st.markdown(
-            f"""
-            <div class="mc-agent-head">
-              <img class="mc-avatar" src="{board_avatar_uri}" alt="Moodboard Agent Avatar" />
-              <h3 style="margin:0">Agent 3: Moodboard Composer</h3>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.write("**Persona:** Spatial Storyteller")
-        st.write("**Mission:** Synthesize products + style into a coherent visual and design narrative.")
-        st.write("**What it does:**")
-        st.write("- Composes moodboard item set")
-        st.write("- Produces design story and placement guidance")
-        st.write("- Supports AI image render generation")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with c4:
-        st.markdown('<div class="mc-card">', unsafe_allow_html=True)
-        st.markdown(
-            f"""
-            <div class="mc-agent-head">
-              <img class="mc-avatar" src="{orchestrator_avatar_uri}" alt="Orchestrator Avatar" />
-              <h3 style="margin:0">Orchestrator + Evaluator</h3>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.write("**Persona:** Quality Lead")
-        st.write("**Mission:** Coordinate agent outputs and validate final answer quality.")
-        st.write("**What it does:**")
-        st.write("- Combines retrieved context + agent outputs")
-        st.write("- Generates final response to user prompts")
-        st.write("- Runs QAEval, ranking, and feedback analytics")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown("---")
-    st.markdown("**How they collaborate**")
-    st.write("1. Style Interpreter creates design DNA from prompt/image context.")
-    st.write("2. Retail Sourcing finds products that match style + budget.")
-    st.write("3. Moodboard Composer builds a cohesive concept and presentation.")
-    st.write("4. Orchestrator answers user questions and tracks quality with QAEval + feedback.")
+    st.markdown("### Architecture Highlighter")
+    st.markdown(
+        """
+        <div class="mc-arch">
+          <b>1) User Input</b>: prompt + uploaded room images + controls<br/>
+          <b>2) Retrieval</b>: image chunking -> embedding -> vector match context<br/>
+          <b>3) Agent Conversation</b>: Vision -> Style -> Retail Curator -> Synthesis<br/>
+          <b>4) Generation</b>: produce 3 room-image variants + accessories list<br/>
+          <b>5) Diagnostics</b>: QAEval, agent ranking, usage KPIs, thumbs feedback
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown("### Inter-Agent Message Flow")
+    st.code(
+        "Vision Agent JSON -> Style Agent JSON -> Retail Curator JSON -> Synthesis JSON -> Final Brief",
+        language="text",
+    )
+    st.markdown("### Budget & Creativity Flow")
+    st.markdown(
+        """
+        <div class="mc-arch">
+          <b>Budget (Retail Step)</b><br/>
+          1) User selects budget range in sidebar.<br/>
+          2) Budget is passed into the 3-agent consensus pipeline.<br/>
+          3) Retail sourcing filters products strictly within min/max range.<br/>
+          4) Filtered products are used for checklist, links, and image context.
+          <br/><br/>
+          <b>Creativity (Generation + LLM Style)</b><br/>
+          1) User sets creativity level (global + quick-flow slider).<br/>
+          2) Creativity modifies image prompt style (conservative vs expressive).<br/>
+          3) Same creativity is used as LLM temperature for answer tone/variation.<br/>
+          4) Higher creativity explores bolder alternatives; lower creativity keeps practical output.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if st.session_state.quick_context.get("agent_messages"):
+        st.markdown("### Latest Run: Agent Messages")
+        st.dataframe(pd.DataFrame(st.session_state.quick_context["agent_messages"]), use_container_width=True)
 
 if False:
     st.subheader("How It Works & Architecture")
@@ -1057,11 +1179,13 @@ with tab_diag:
         avg_products = float(udf["product_count"].mean()) if "product_count" in udf.columns else 0.0
         top_design = udf["design_type"].value_counts().idxmax() if "design_type" in udf.columns else "N/A"
         top_product = udf["top_product"].value_counts().idxmax() if "top_product" in udf.columns and len(udf["top_product"].dropna()) else "N/A"
-        k1, k2, k3, k4 = st.columns(4)
+        avg_conflicts = float(udf["conflict_count"].mean()) if "conflict_count" in udf.columns else 0.0
+        k1, k2, k3, k4, k5 = st.columns(5)
         k1.metric("Design Requests", up_count)
         k2.metric("Avg Products/Request", f"{avg_products:.1f}")
         k3.metric("Top Design Type", top_design)
         k4.metric("Most Suggested Product", top_product)
+        k5.metric("Avg Resolved Conflicts", f"{avg_conflicts:.1f}")
     question = st.text_input("Ask a design question")
     if st.button("Ask", use_container_width=True):
         if not api_key:
