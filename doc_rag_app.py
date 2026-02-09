@@ -14,6 +14,7 @@ from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from openai import OpenAI
 from pypdf import PdfReader
 
 
@@ -32,6 +33,8 @@ COLLECTION_NAME = "doc_rag_collection"
 DEFAULT_MODEL = "gpt-4.1-mini"
 DEFAULT_EMBED_MODEL = "text-embedding-3-small"
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "25"))
+MODEL_OPTIONS = ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"]
+EMBED_OPTIONS = ["text-embedding-3-small", "text-embedding-3-large"]
 
 
 
@@ -60,13 +63,18 @@ def _safe_error_msg(prefix: str, exc: Exception) -> str:
 
 
 @st.cache_resource(show_spinner=False)
-def get_embeddings(api_key: str) -> OpenAIEmbeddings:
-    return OpenAIEmbeddings(model=DEFAULT_EMBED_MODEL, api_key=api_key)
+def get_openai_client(api_key: str) -> OpenAI:
+    return OpenAI(api_key=api_key)
 
 
 @st.cache_resource(show_spinner=False)
-def get_llm(api_key: str) -> ChatOpenAI:
-    return ChatOpenAI(model=DEFAULT_MODEL, temperature=0, api_key=api_key)
+def get_embeddings(api_key: str, embed_model: str) -> OpenAIEmbeddings:
+    return OpenAIEmbeddings(model=embed_model, api_key=api_key)
+
+
+@st.cache_resource(show_spinner=False)
+def get_llm(api_key: str, llm_model: str) -> ChatOpenAI:
+    return ChatOpenAI(model=llm_model, temperature=0, api_key=api_key)
 
 
 def vector_count(vectorstore: Chroma) -> int:
@@ -74,6 +82,53 @@ def vector_count(vectorstore: Chroma) -> int:
         return int(vectorstore._collection.count())  # noqa: SLF001
     except Exception:
         return 0
+
+
+def is_web_intent(question: str) -> bool:
+    q = question.lower()
+    hints = [
+        "today",
+        "latest",
+        "current",
+        "right now",
+        "news",
+        "who is",
+        "president",
+        "ceo",
+        "stock",
+        "price",
+        "weather",
+        "this week",
+        "this month",
+    ]
+    return any(h in q for h in hints)
+
+
+def web_search_answer(api_key: str, model: str, question: str) -> str:
+    client = get_openai_client(api_key)
+    web_prompt = (
+        "Answer using live web information. Keep it concise and factual. "
+        "If possible, include source names/links."
+    )
+
+    # Try currently supported tool variants defensively.
+    try:
+        resp = client.responses.create(
+            model=model,
+            input=f"{web_prompt}\n\nQuestion: {question}",
+            tools=[{"type": "web_search_preview"}],
+        )
+        if getattr(resp, "output_text", ""):
+            return resp.output_text
+    except Exception:
+        pass
+
+    resp = client.responses.create(
+        model=model,
+        input=f"{web_prompt}\n\nQuestion: {question}",
+        tools=[{"type": "web_search"}],
+    )
+    return getattr(resp, "output_text", "") or "Web search returned no text output."
 
 
 
@@ -175,8 +230,8 @@ def chunk_documents(raw_docs: List[Document], chunk_size: int, chunk_overlap: in
 
 
 
-def build_vector_db(split_docs: List[Document], api_key: str, rebuild: bool) -> Chroma:
-    embeddings = get_embeddings(api_key)
+def build_vector_db(split_docs: List[Document], api_key: str, rebuild: bool, embed_model: str) -> Chroma:
+    embeddings = get_embeddings(api_key, embed_model)
 
     if rebuild and VECTOR_DB_DIR.exists():
         shutil.rmtree(VECTOR_DB_DIR, ignore_errors=True)
@@ -203,8 +258,8 @@ def build_vector_db(split_docs: List[Document], api_key: str, rebuild: bool) -> 
 
 
 
-def load_vector_db(api_key: str) -> Chroma:
-    embeddings = get_embeddings(api_key)
+def load_vector_db(api_key: str, embed_model: str) -> Chroma:
+    embeddings = get_embeddings(api_key, embed_model)
     return Chroma(
         persist_directory=str(VECTOR_DB_DIR),
         collection_name=COLLECTION_NAME,
@@ -248,6 +303,7 @@ def rag_answer(
     prompt_mode: str,
     history: List[Dict[str, str]],
     top_k: int,
+    llm_model: str,
 ) -> Tuple[str, List[Document]]:
     retriever = vectorstore.as_retriever(search_kwargs={"k": top_k})
     docs = retriever.invoke(question)
@@ -262,7 +318,7 @@ def rag_answer(
 
     hist_txt = "\n".join([f"{m['role']}: {m['content']}" for m in history[-6:]]) or "No prior history"
 
-    llm = get_llm(api_key)
+    llm = get_llm(api_key, llm_model)
     prompt = build_prompt(prompt_mode)
     chain = prompt | llm
     resp = chain.invoke({"question": question, "history": hist_txt, "context": context})
@@ -291,6 +347,9 @@ with st.sidebar:
     st.header("Configuration")
     default_key = resolve_api_key()
     api_key = st.text_input("OpenAI API Key", value=default_key, type="password")
+    llm_model = st.selectbox("LLM Model", options=MODEL_OPTIONS, index=MODEL_OPTIONS.index(DEFAULT_MODEL))
+    embed_model = st.selectbox("Embedding Model", options=EMBED_OPTIONS, index=EMBED_OPTIONS.index(DEFAULT_EMBED_MODEL))
+    enable_web_search = st.checkbox("Enable Web Search Assist", value=False)
     prompt_mode = st.radio("Prompt Type", ["Single Prompt", "Reasoning Prompt"], index=0)
     chunk_size = st.slider("Chunk Size", min_value=300, max_value=2000, value=900, step=100)
     chunk_overlap = st.slider("Chunk Overlap", min_value=0, max_value=400, value=150, step=25)
@@ -302,12 +361,12 @@ with st.sidebar:
         else:
             try:
                 start = time.perf_counter()
-                llm = get_llm(api_key)
+                llm = get_llm(api_key, llm_model)
                 health_resp = llm.invoke("Reply with exactly: HEALTH_OK")
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 out = health_resp.content if hasattr(health_resp, "content") else str(health_resp)
                 if "HEALTH_OK" in out:
-                    st.success(f"LLM reachable. Model={DEFAULT_MODEL}, latency={elapsed_ms:.0f} ms")
+                    st.success(f"LLM reachable. Model={llm_model}, latency={elapsed_ms:.0f} ms")
                 else:
                     st.warning(f"LLM reachable but unexpected response: {out}")
             except Exception as exc:
@@ -319,6 +378,7 @@ with st.sidebar:
         st.success("Chat history cleared.")
     st.caption("For sharing/deployment, set `OPENAI_API_KEY` in Streamlit Secrets.")
     st.caption("Vector DB path is local to the app runtime: `vector_db_docs/`.")
+    st.caption("Web Search Assist uses OpenAI web search tool for live/current queries.")
     st.caption(f"Max upload size per file: {MAX_UPLOAD_MB} MB")
 
 ingest_tab, chat_tab, eval_tab = st.tabs(["Ingest + Vector DB", "RAG Chat", "QAEval Dashboard"])
@@ -352,7 +412,7 @@ with ingest_tab:
                 st.error("No readable documents found from uploads/paths.")
             else:
                 chunks = chunk_documents(raw_docs, chunk_size, chunk_overlap)
-                build_vector_db(chunks, api_key, rebuild=rebuild_db)
+                build_vector_db(chunks, api_key, rebuild=rebuild_db, embed_model=embed_model)
 
                 st.success("Vector DB updated successfully.")
                 c1, c2, c3, c4 = st.columns(4)
@@ -383,10 +443,18 @@ with chat_tab:
             st.markdown(q)
 
         try:
-            vs = load_vector_db(api_key)
+            vs = load_vector_db(api_key, embed_model)
             if vector_count(vs) == 0:
                 raise ValueError("Vector DB is empty. Ingest documents first.")
-            answer, docs = rag_answer(vs, api_key, q, prompt_mode, st.session_state.doc_chat_history, top_k)
+            answer, docs = rag_answer(vs, api_key, q, prompt_mode, st.session_state.doc_chat_history, top_k, llm_model)
+
+            if enable_web_search and is_web_intent(q):
+                try:
+                    web_ans = web_search_answer(api_key, llm_model, q)
+                    answer = f"{answer}\n\nLive Web Check:\n{web_ans}"
+                except Exception as web_exc:
+                    answer = f"{answer}\n\nLive Web Check:\nUnavailable ({web_exc})"
+
             st.session_state.doc_chat_history.append({"role": "assistant", "content": answer})
 
             with st.chat_message("assistant"):
@@ -424,16 +492,16 @@ with eval_tab:
                 st.error("No valid evaluation rows found. Use `question || answer` format.")
             else:
                 try:
-                    vs = load_vector_db(api_key)
+                    vs = load_vector_db(api_key, embed_model)
                     if vector_count(vs) == 0:
                         raise ValueError("Vector DB is empty. Ingest documents first.")
                     preds = []
                     for q in eval_df["question"]:
-                        pred, _ = rag_answer(vs, api_key, q, prompt_mode, history=[], top_k=top_k)
+                        pred, _ = rag_answer(vs, api_key, q, prompt_mode, history=[], top_k=top_k, llm_model=llm_model)
                         preds.append(pred)
                     eval_df["prediction"] = preds
 
-                    llm = get_llm(api_key)
+                    llm = get_llm(api_key, llm_model)
                     qa_chain = QAEvalChain.from_llm(llm)
                     examples = [{"query": r.question, "answer": r.ground_truth} for r in eval_df.itertuples(index=False)]
                     predictions = [{"result": r.prediction} for r in eval_df.itertuples(index=False)]
