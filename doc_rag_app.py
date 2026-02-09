@@ -398,7 +398,7 @@ with st.sidebar:
     llm_model = st.selectbox("LLM Model", options=MODEL_OPTIONS, index=MODEL_OPTIONS.index(DEFAULT_MODEL))
     embed_model = st.selectbox("Embedding Model", options=EMBED_OPTIONS, index=EMBED_OPTIONS.index(DEFAULT_EMBED_MODEL))
     enable_web_search = st.checkbox("Enable Web Search Assist", value=False)
-    auto_qaeval = st.checkbox("Auto QAEval for every chat response", value=False)
+    auto_qaeval = st.checkbox("Auto QAEval for every chat response", value=True)
     prompt_mode = st.radio("Prompt Type", ["Single Prompt", "Reasoning Prompt"], index=0)
     chunk_size = st.slider("Chunk Size", min_value=300, max_value=2000, value=900, step=100)
     chunk_overlap = st.slider("Chunk Overlap", min_value=0, max_value=400, value=150, step=25)
@@ -546,6 +546,12 @@ with chat_tab:
 
             with st.chat_message("assistant"):
                 st.markdown(answer)
+                if auto_qaeval and st.session_state.auto_qaeval_log:
+                    last_eval = st.session_state.auto_qaeval_log[-1]
+                    st.caption(
+                        f"Auto QAEval: **{last_eval.get('qaeval_grade', 'N/A')}** - "
+                        f"{last_eval.get('qaeval_reason', '')[:180]}"
+                    )
                 with st.expander("Retrieved Chunks"):
                     for i, d in enumerate(docs, start=1):
                         st.markdown(
