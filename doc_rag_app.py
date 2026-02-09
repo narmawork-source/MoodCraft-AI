@@ -2,6 +2,7 @@ import io
 import os
 import shutil
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -327,6 +328,51 @@ def rag_answer(
 
 
 
+def context_from_docs(docs: List[Document]) -> str:
+    context_blocks = []
+    for i, d in enumerate(docs, start=1):
+        source = d.metadata.get("source", "unknown")
+        page = d.metadata.get("page", "-")
+        chunk_id = d.metadata.get("chunk_id", "-")
+        context_blocks.append(f"[{i}] {source} | page={page} | chunk={chunk_id}\n{d.page_content}")
+    return "\n\n".join(context_blocks)
+
+
+def generate_reference_answer(question: str, context: str, api_key: str, llm_model: str) -> str:
+    llm = get_llm(api_key, llm_model)
+    prompt = (
+        "Generate a concise reference answer using only the provided context. "
+        "If the answer is not present, respond exactly with NOT_FOUND_IN_CONTEXT.\n\n"
+        f"Question:\n{question}\n\nContext:\n{context}"
+    )
+    resp = llm.invoke(prompt)
+    return resp.content if hasattr(resp, "content") else str(resp)
+
+
+def run_qaeval_single(
+    question: str,
+    reference_answer: str,
+    model_answer: str,
+    api_key: str,
+    llm_model: str,
+) -> Tuple[str, str]:
+    llm = get_llm(api_key, llm_model)
+    qa_chain = QAEvalChain.from_llm(llm)
+    graded = qa_chain.evaluate(
+        examples=[{"query": question, "answer": reference_answer}],
+        predictions=[{"result": model_answer}],
+        question_key="query",
+        answer_key="answer",
+        prediction_key="result",
+    )
+    txt = (graded[0].get("text") or str(graded[0])).strip()
+    up = txt.upper()
+    grade = "INCORRECT"
+    if "CORRECT" in up and "INCORRECT" not in up:
+        grade = "CORRECT"
+    return grade, txt
+
+
 def parse_eval_lines(raw_text: str) -> pd.DataFrame:
     rows = []
     for line in raw_text.splitlines():
@@ -342,6 +388,8 @@ def parse_eval_lines(raw_text: str) -> pd.DataFrame:
 
 if "doc_chat_history" not in st.session_state:
     st.session_state.doc_chat_history = []
+if "auto_qaeval_log" not in st.session_state:
+    st.session_state.auto_qaeval_log = []
 
 with st.sidebar:
     st.header("Configuration")
@@ -350,6 +398,7 @@ with st.sidebar:
     llm_model = st.selectbox("LLM Model", options=MODEL_OPTIONS, index=MODEL_OPTIONS.index(DEFAULT_MODEL))
     embed_model = st.selectbox("Embedding Model", options=EMBED_OPTIONS, index=EMBED_OPTIONS.index(DEFAULT_EMBED_MODEL))
     enable_web_search = st.checkbox("Enable Web Search Assist", value=False)
+    auto_qaeval = st.checkbox("Auto QAEval for every chat response", value=False)
     prompt_mode = st.radio("Prompt Type", ["Single Prompt", "Reasoning Prompt"], index=0)
     chunk_size = st.slider("Chunk Size", min_value=300, max_value=2000, value=900, step=100)
     chunk_overlap = st.slider("Chunk Overlap", min_value=0, max_value=400, value=150, step=25)
@@ -447,6 +496,7 @@ with chat_tab:
             if vector_count(vs) == 0:
                 raise ValueError("Vector DB is empty. Ingest documents first.")
             answer, docs = rag_answer(vs, api_key, q, prompt_mode, st.session_state.doc_chat_history, top_k, llm_model)
+            rag_core_answer = answer
 
             if enable_web_search and is_web_intent(q):
                 try:
@@ -454,6 +504,43 @@ with chat_tab:
                     answer = f"{answer}\n\nLive Web Check:\n{web_ans}"
                 except Exception as web_exc:
                     answer = f"{answer}\n\nLive Web Check:\nUnavailable ({web_exc})"
+
+            if auto_qaeval:
+                try:
+                    ctx = context_from_docs(docs)
+                    ref = generate_reference_answer(q, ctx, api_key, llm_model)
+                    grade, reason = run_qaeval_single(
+                        question=q,
+                        reference_answer=ref,
+                        model_answer=rag_core_answer,
+                        api_key=api_key,
+                        llm_model=llm_model,
+                    )
+                    st.session_state.auto_qaeval_log.append(
+                        {
+                            "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                            "question": q,
+                            "reference_answer": ref,
+                            "model_answer": rag_core_answer,
+                            "qaeval_grade": grade,
+                            "qaeval_reason": reason,
+                            "prompt_mode": prompt_mode,
+                            "llm_model": llm_model,
+                        }
+                    )
+                except Exception as eval_exc:
+                    st.session_state.auto_qaeval_log.append(
+                        {
+                            "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                            "question": q,
+                            "reference_answer": "",
+                            "model_answer": rag_core_answer,
+                            "qaeval_grade": "ERROR",
+                            "qaeval_reason": str(eval_exc),
+                            "prompt_mode": prompt_mode,
+                            "llm_model": llm_model,
+                        }
+                    )
 
             st.session_state.doc_chat_history.append({"role": "assistant", "content": answer})
 
@@ -475,6 +562,29 @@ with chat_tab:
 
 with eval_tab:
     st.subheader("3) QAEvalChain Evaluation + Metrics")
+    st.markdown("**Auto QAEval Log (Every Chat Turn)**")
+    auto_df = pd.DataFrame(st.session_state.auto_qaeval_log)
+    if not auto_df.empty:
+        graded = auto_df[auto_df["qaeval_grade"].isin(["CORRECT", "INCORRECT"])]
+        total_auto = len(graded)
+        correct_auto = int((graded["qaeval_grade"] == "CORRECT").sum()) if total_auto else 0
+        incorrect_auto = int((graded["qaeval_grade"] == "INCORRECT").sum()) if total_auto else 0
+        acc_auto = (correct_auto / total_auto * 100) if total_auto else 0.0
+        a1, a2, a3 = st.columns(3)
+        a1.metric("Auto Eval Accuracy", f"{acc_auto:.2f}%")
+        a2.metric("Auto Correct", correct_auto)
+        a3.metric("Auto Incorrect", incorrect_auto)
+        st.dataframe(auto_df, use_container_width=True)
+        st.download_button(
+            "Download Auto QAEval Log CSV",
+            data=auto_df.to_csv(index=False).encode("utf-8"),
+            file_name="auto_qaeval_log.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("No auto evaluations yet. Enable 'Auto QAEval for every chat response' in sidebar and ask questions.")
+
+    st.divider()
     st.caption("Format: question || ground_truth_answer (one pair per line)")
     eval_default = (
         "Which product performed best in the latest quarter? || Widget D performed best in the latest quarter based on retrieved context.\n"
