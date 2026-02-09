@@ -139,6 +139,14 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
   padding: .55rem .75rem;
   margin-bottom: .5rem;
 }
+.mc-arch {
+  background: #ffffff;
+  border: 1px solid #e6dbc8;
+  border-radius: 14px;
+  padding: .9rem 1rem;
+  box-shadow: 0 4px 12px rgba(40,48,67,.05);
+}
+.mc-arch b { color: #1f2a3d; }
 @media (max-width: 900px) {
   .mc-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mc-front-grid { grid-template-columns: 1fr; }
@@ -483,39 +491,63 @@ def render_feedback_controls(scope: str, question: str, answer: str):
 
 with st.sidebar:
     st.subheader("Control Center")
+    app_view = st.radio("App View", ["Simple", "Advanced"], index=0)
     api_key = st.text_input("OpenAI API Key", value=os.getenv("OPENAI_API_KEY", ""), type="password")
-    llm_model = st.selectbox(
-        "LLM Model",
-        ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"],
-        index=0,
-    )
-    image_model = st.selectbox(
-        "Image Model",
-        ["gpt-image-1", "dall-e-3"],
-        index=0,
-    )
-    creativity_enabled = st.toggle("Creativity Mode", value=False)
-    creativity_level = st.slider(
-        "Creativity Level",
-        0.0,
-        1.0,
-        0.7 if creativity_enabled else 0.0,
-        0.05,
-        disabled=not creativity_enabled,
-    )
-    design_type = st.selectbox(
-        "Design Type",
-        [
-            "Modern",
-            "Industrial",
-            "Contemporary",
-            "Traditional",
-        ],
-        index=0,
-    )
-    budget_min, budget_max = st.slider("Budget Range", 20, 1500, (100, 400), step=10)
-    decor_text = st.text_input("Decor Types (comma)", value="rug,lamp,console")
-    auto_qaeval = st.checkbox("Auto QAEval", value=True)
+    with st.expander("Settings", expanded=True):
+        llm_model = st.selectbox(
+            "LLM Model",
+            ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"],
+            index=0,
+        )
+        image_model = st.selectbox(
+            "Image Model",
+            ["gpt-image-1", "dall-e-3"],
+            index=0,
+        )
+        creativity_enabled = st.toggle("Creativity Mode", value=False)
+        creativity_level = st.slider(
+            "Creativity Level",
+            0.0,
+            1.0,
+            0.7 if creativity_enabled else 0.0,
+            0.05,
+            disabled=not creativity_enabled,
+        )
+        design_type = st.selectbox(
+            "Design Type",
+            [
+                "Modern",
+                "Industrial",
+                "Contemporary",
+                "Traditional",
+            ],
+            index=0,
+        )
+        budget_min, budget_max = st.slider("Budget Range", 20, 1500, (100, 400), step=10)
+        decor_text = st.text_input("Decor Types (comma)", value="rug,lamp,console")
+        auto_qaeval = st.checkbox("Auto QAEval", value=True)
+
+    if app_view == "Simple":
+        current_section = st.selectbox(
+            "Section",
+            ["Quick Design Studio", "Meet Our Agents", "How It Works & Architecture"],
+            index=0,
+        )
+    else:
+        current_section = st.selectbox(
+            "Section",
+            [
+                "Quick Design Studio",
+                "Meet Our Agents",
+                "How It Works & Architecture",
+                "Agent 1: Style",
+                "Agent 2: Retail",
+                "Agent 3: Moodboard",
+                "QAEval + Trace",
+                "Image KB + Agent Chat",
+            ],
+            index=0,
+        )
 
     st.markdown("---")
     st.markdown("**Workflow**")
@@ -530,12 +562,88 @@ retail_avatar_uri = load_avatar_data_uri("design_agents/assets/retail_avatar.svg
 board_avatar_uri = load_avatar_data_uri("design_agents/assets/board_avatar.svg")
 orchestrator_avatar_uri = load_avatar_data_uri("design_agents/assets/orchestrator_avatar.svg")
 
+if current_section == "Quick Design Studio":
+    st.subheader("Quick Design Studio")
+    st.caption("Simple flow: upload your room image, tell us what you want, and get a generated room concept plus accessories.")
 
-t0, t1, t2, t3, t4, t5 = st.tabs(
-    ["Meet Our Agents", "Agent 1: Style", "Agent 2: Retail", "Agent 3: Moodboard", "QAEval + Trace", "Image KB + Agent Chat"]
-)
+    q_prompt = st.text_input("What do you want to design?", value=f"{design_type.lower()} living room")
+    q_uploads = st.file_uploader(
+        "Upload room/inspiration image(s)",
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=True,
+        key="quick_design_uploader",
+    )
+    q_creativity = st.slider("Creativity (Quick Flow)", 0.0, 1.0, creativity_level, 0.05)
 
-with t0:
+    if st.button("Generate My Design", use_container_width=True):
+        if not api_key:
+            st.error("Set OPENAI_API_KEY first.")
+        elif not q_prompt.strip():
+            st.error("Enter a design prompt.")
+        else:
+            try:
+                matches = []
+                if q_uploads:
+                    vs = get_image_vector_store(api_key)
+                    for f in q_uploads:
+                        docs = chunk_image_to_documents(f.getvalue(), f.name, q_prompt, grid=3)
+                        ids = [str(uuid.uuid4()) for _ in docs]
+                        vs.add_documents(docs, ids=ids)
+                    matches = retrieve_image_matches(vs, q_prompt, top_k=8)
+
+                matched_image = matches[0]["image_name"] if matches else "none"
+                style_seed = f"design_type={design_type}. prompt={q_prompt}. matched_image={matched_image}"
+                style_dna = analyze_style_dna(style_seed)
+                decor = style_dna.get("decor_types", ["rug", "lamp", "console", "chair"])
+                products = search_products(style_dna, decor, budget_min, budget_max)
+                board = compose_moodboard(style_dna, products)
+
+                with st.spinner("Generating your new design image..."):
+                    img_bytes = generate_moodboard_image(
+                        api_key=api_key,
+                        design_type=design_type,
+                        style_dna=style_dna,
+                        products=products,
+                        image_model=image_model,
+                        creativity=q_creativity,
+                    )
+
+                st.markdown("### Your New Room Concept")
+                st.image(img_bytes, caption=f"Generated concept for: {q_prompt}", use_container_width=True)
+                st.download_button(
+                    "Download Generated Image",
+                    data=img_bytes,
+                    file_name="quick_design_concept.png",
+                    mime="image/png",
+                    use_container_width=True,
+                )
+
+                if matches:
+                    st.markdown("### Closest Match From Your Uploaded Images")
+                    st.dataframe(pd.DataFrame(matches), use_container_width=True)
+
+                st.markdown("### Accessories Needed (With Shopping Links & Pricing)")
+                if products:
+                    prod_df = pd.DataFrame(products)[["title", "retailer", "price", "match_score", "url"]]
+                    st.dataframe(prod_df, use_container_width=True)
+                    for p in products[:6]:
+                        st.markdown(
+                            f"- **{p['title']}** | {p['retailer']} | `${p['price']}` | [Buy Link]({p['url']})"
+                        )
+                else:
+                    st.warning("No products found in selected budget range. Increase the budget range in sidebar.")
+
+                st.markdown("### Agent Summary")
+                st.write(
+                    f"Style Agent identified: {', '.join(style_dna.get('style_tags', []))}. "
+                    f"Retail Agent sourced {len(products)} items. "
+                    f"Moodboard Agent prepared {len(board.get('board_items', []))} placements."
+                )
+
+            except Exception as exc:
+                st.error(f"Quick design generation failed: {exc}")
+
+if current_section == "Meet Our Agents":
     st.subheader("Meet Our Agents")
     st.caption("Each agent has a focused role and they collaborate to produce a complete interior design recommendation.")
 
@@ -624,7 +732,72 @@ with t0:
     st.write("3. Moodboard Composer builds a cohesive concept and presentation.")
     st.write("4. Orchestrator answers user questions and tracks quality with QAEval + feedback.")
 
-with t1:
+if current_section == "How It Works & Architecture":
+    st.subheader("How It Works & Architecture")
+    st.caption("Technical overview of models, agent roles, MCP interfaces, and full data flow.")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("### Models Used")
+        st.write(f"- LLM (configurable): `{llm_model}`")
+        st.write(f"- Image generation (configurable): `{image_model}`")
+        st.write("- Image/text embeddings: `text-embedding-3-small`")
+        st.write("- QAEval judge model: `gpt-4.1-mini`")
+        st.write("- Live web search model: uses selected LLM model with web search tool")
+
+        st.markdown("### Agent Purpose")
+        st.write("- `Style Agent`: derives style tags, palette, materials, decor constraints from prompt/image context.")
+        st.write("- `Retail Agent`: ranks products by style fit and budget, returns links and pricing.")
+        st.write("- `Moodboard Agent`: composes board items and design story/placement guidance.")
+        st.write("- `Orchestrator`: combines retrieval + agent outputs into final answer.")
+
+    with c2:
+        st.markdown("### MCP Details")
+        st.write("- `mcp_style_server.py` exposes style interpretation tool endpoint.")
+        st.write("- `mcp_retail_server.py` exposes product sourcing tool endpoint.")
+        st.write("- `mcp_board_server.py` exposes moodboard composition tool endpoint.")
+        st.write("- Streamlit app acts as orchestrator/client calling these capabilities.")
+
+        st.markdown("### Vector & Storage")
+        st.write("- Uploaded images are tiled (3x3 chunks) into semantic descriptors.")
+        st.write("- Chunk descriptors are embedded and stored in Chroma vector DB.")
+        st.write("- Retrieval selects closest uploaded image context for personalization.")
+
+    st.markdown("### Architecture Highlighter")
+    st.markdown(
+        """
+        <div class="mc-arch">
+          <b>1) Input Layer</b>: User prompt + image upload + design controls<br/>
+          <b>2) Retrieval Layer</b>: Image chunking -> embedding -> Chroma vector search<br/>
+          <b>3) Agent Layer</b>: Style Agent -> Retail Agent -> Moodboard Agent<br/>
+          <b>4) Generation Layer</b>: LLM response + generated room image<br/>
+          <b>5) Evaluation Layer</b>: QAEval + agent ranking + thumbs up/down analytics
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("### End-to-End Flow")
+    st.code(
+        "User Upload/Prompt -> Chunk & Index -> Retrieve Similar Context -> "
+        "Style DNA -> Product Ranking -> Moodboard Plan -> New Image -> "
+        "Final Answer + Shopping Links -> QAEval + Feedback Metrics",
+        language="text",
+    )
+
+    st.markdown("### Key Implementation Files")
+    st.code(
+        "design_agents_app.py\n"
+        "design_agents/style_agent.py\n"
+        "design_agents/retail_agent.py\n"
+        "design_agents/moodboard_agent.py\n"
+        "mcp_style_server.py\n"
+        "mcp_retail_server.py\n"
+        "mcp_board_server.py",
+        language="text",
+    )
+
+if current_section == "Agent 1: Style":
     st.subheader("Style Interpreter")
     prompt = st.text_input("Design Prompt", value=f"cozy {design_type.lower()} living room")
     if st.button("Run Style Interpreter", use_container_width=True):
@@ -637,7 +810,7 @@ with t1:
     if st.session_state.style_dna:
         render_style_dna(st.session_state.style_dna)
 
-with t2:
+if current_section == "Agent 2: Retail":
     st.subheader("Retail Sourcing")
     if st.button("Run Retail Sourcing", use_container_width=True):
         dna = st.session_state.style_dna
@@ -654,7 +827,7 @@ with t2:
     if st.session_state.products:
         render_products(st.session_state.products)
 
-with t3:
+if current_section == "Agent 3: Moodboard":
     st.subheader("Moodboard Composer")
     if st.button("Run Moodboard Composer", use_container_width=True):
         dna = st.session_state.style_dna
@@ -702,7 +875,7 @@ with t3:
             mime="image/png",
         )
 
-with t4:
+if current_section == "QAEval + Trace":
     st.subheader("Q&A + Automated QAEval")
     question = st.text_input("Ask a design question")
     if st.button("Ask", use_container_width=True):
@@ -810,7 +983,7 @@ with t4:
             )
             st.dataframe(by_scope, use_container_width=True)
 
-with t5:
+if current_section == "Image KB + Agent Chat":
     st.subheader("Image Upload + Vector Search + Agent Conversation")
     st.caption("Upload images, chunk into tiles, store in vector DB, then chat to match image vibe and generate moodboard.")
     enable_live_web = st.checkbox("Enable Live Web Search in this tab", value=False)
