@@ -152,9 +152,9 @@ st.markdown(
     """
 <div class="mc-hero">
   <p class="mc-title">MoodCraft AI</p>
-  <p class="mc-sub">Three-agent interior design copilot that analyzes your room, sources products, composes moodboards, and measures quality with QAEval.</p>
+  <p class="mc-sub">Multi-agent interior design copilot that analyzes your room, sources products, composes design options, and measures quality with QAEval.</p>
   <div class="mc-kpis">
-    <div class="mc-kpi"><div class="v">3 Agents</div><div class="l">Style, Retail, Moodboard</div></div>
+    <div class="mc-kpi"><div class="v">4 Agents</div><div class="l">Vision, Style, Retail, Finalizer</div></div>
     <div class="mc-kpi"><div class="v">Image KB</div><div class="l">Chunked + Vector Search</div></div>
     <div class="mc-kpi"><div class="v">QAEval</div><div class="l">Prompt-Level Evaluation</div></div>
     <div class="mc-kpi"><div class="v">Feedback</div><div class="l">Thumbs Up / Down Metrics</div></div>
