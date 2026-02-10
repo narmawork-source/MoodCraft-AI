@@ -863,6 +863,53 @@ with tab_design:
                         "conflict_count": len(synthesis.get("resolved_conflicts", [])),
                     }
                 )
+                if auto_qaeval and api_key:
+                    prediction = (
+                        f"Final brief: {synthesis.get('final_design_brief', '')}. "
+                        f"Resolved conflicts: {synthesis.get('resolved_conflicts', [])}. "
+                        f"Top products: {[p.get('title') for p in products[:3]]}."
+                    )
+                    reference = (
+                        f"Response should satisfy prompt '{q_prompt}', align with design type '{design_type}', "
+                        f"respect budget range {budget_min}-{budget_max}, and include practical decor guidance."
+                    )
+                    ev = eval_answer(api_key, q_prompt, reference, prediction)
+                    agent_eval = evaluate_agents(
+                        api_key=api_key,
+                        llm_model=llm_model,
+                        question=q_prompt,
+                        style_dna=style_dna,
+                        products=products,
+                        board=board,
+                        final_answer=prediction,
+                    )
+                    st.session_state.qa_log.append(
+                        {
+                            "question": q_prompt,
+                            "reference": reference,
+                            "prediction": prediction,
+                            "qaeval_grade": ev["grade"],
+                            "qaeval_reason": ev["reason"],
+                            "style_agent_score": agent_eval.get("style_agent", {}).get("score", 0),
+                            "retail_agent_score": agent_eval.get("retail_agent", {}).get("score", 0),
+                            "moodboard_agent_score": agent_eval.get("moodboard_agent", {}).get("score", 0),
+                            "orchestrator_score": agent_eval.get("orchestrator", {}).get("score", 0),
+                        }
+                    )
+                    st.session_state.agent_eval_log.append(
+                        {
+                            "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                            "question": q_prompt,
+                            "style_agent_score": agent_eval.get("style_agent", {}).get("score", 0),
+                            "style_agent_reason": agent_eval.get("style_agent", {}).get("reason", ""),
+                            "retail_agent_score": agent_eval.get("retail_agent", {}).get("score", 0),
+                            "retail_agent_reason": agent_eval.get("retail_agent", {}).get("reason", ""),
+                            "moodboard_agent_score": agent_eval.get("moodboard_agent", {}).get("score", 0),
+                            "moodboard_agent_reason": agent_eval.get("moodboard_agent", {}).get("reason", ""),
+                            "orchestrator_score": agent_eval.get("orchestrator", {}).get("score", 0),
+                            "orchestrator_reason": agent_eval.get("orchestrator", {}).get("reason", ""),
+                        }
+                    )
 
             except Exception as exc:
                 st.error(f"Quick design generation failed: {exc}")
@@ -1183,7 +1230,7 @@ if False:
         )
 
 with tab_diag:
-    st.subheader("Q&A + Automated QAEval")
+    st.subheader("Diagnostics (Automatic QAEval)")
     if st.session_state.usage_log:
         udf = pd.DataFrame(st.session_state.usage_log)
         up_count = len(udf)
@@ -1197,70 +1244,7 @@ with tab_diag:
         k3.metric("Top Design Type", top_design)
         k4.metric("Most Suggested Product", top_product)
         k5.metric("Avg Resolved Conflicts", f"{avg_conflicts:.1f}")
-    question = st.text_input("Ask a design question")
-    if st.button("Ask", use_container_width=True):
-        if not api_key:
-            st.error("Set OPENAI_API_KEY.")
-        else:
-            dna = st.session_state.style_dna
-            products = st.session_state.products
-            board = st.session_state.board
-            llm = ChatOpenAI(model=llm_model, temperature=creativity_level, api_key=api_key)
-            answer = llm.invoke(
-                f"Question: {question}\nStyle:{dna}\nProducts:{products[:5]}\nBoard:{board}"
-            ).content
-            st.session_state.last_qa_answer = answer
-            st.session_state.last_qa_question = question
-            st.markdown("**Answer**")
-            st.write(answer)
-
-            if auto_qaeval:
-                reference = "Reference should align with style, products, and moodboard context."
-                ev = eval_answer(api_key, question, reference, answer)
-                agent_eval = evaluate_agents(
-                    api_key=api_key,
-                    llm_model=llm_model,
-                    question=question,
-                    style_dna=dna,
-                    products=products,
-                    board=board,
-                    final_answer=answer,
-                )
-                st.caption(f"Auto QAEval: {ev['grade']}")
-                st.session_state.qa_log.append(
-                    {
-                        "question": question,
-                        "reference": reference,
-                        "prediction": answer,
-                        "qaeval_grade": ev["grade"],
-                        "qaeval_reason": ev["reason"],
-                        "style_agent_score": agent_eval.get("style_agent", {}).get("score", 0),
-                        "retail_agent_score": agent_eval.get("retail_agent", {}).get("score", 0),
-                        "moodboard_agent_score": agent_eval.get("moodboard_agent", {}).get("score", 0),
-                        "orchestrator_score": agent_eval.get("orchestrator", {}).get("score", 0),
-                    }
-                )
-                st.session_state.agent_eval_log.append(
-                    {
-                        "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-                        "question": question,
-                        "style_agent_score": agent_eval.get("style_agent", {}).get("score", 0),
-                        "style_agent_reason": agent_eval.get("style_agent", {}).get("reason", ""),
-                        "retail_agent_score": agent_eval.get("retail_agent", {}).get("score", 0),
-                        "retail_agent_reason": agent_eval.get("retail_agent", {}).get("reason", ""),
-                        "moodboard_agent_score": agent_eval.get("moodboard_agent", {}).get("score", 0),
-                        "moodboard_agent_reason": agent_eval.get("moodboard_agent", {}).get("reason", ""),
-                        "orchestrator_score": agent_eval.get("orchestrator", {}).get("score", 0),
-                        "orchestrator_reason": agent_eval.get("orchestrator", {}).get("reason", ""),
-                    }
-                )
-
-    if st.session_state.last_qa_answer:
-        render_feedback_controls(
-            scope="qa_tab",
-            question=st.session_state.last_qa_question,
-            answer=st.session_state.last_qa_answer,
-        )
+    st.caption("QAEval runs automatically for every `Generate My Design` request. No manual ask required.")
 
     c1, c2 = st.columns(2)
     with c1:
