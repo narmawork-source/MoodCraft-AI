@@ -162,16 +162,16 @@ st.markdown(
 </div>
 <div class="mc-front-grid">
   <div class="mc-front-card">
-    <h4>1) Upload + Interpret</h4>
-    <p>Upload room and inspiration images, then extract style DNA: tags, palette, materials, and constraints.</p>
+    <h4>1) Upload + Understand</h4>
+    <p>Upload your room image and prompt. Vision Agent reads room cues and space constraints.</p>
   </div>
   <div class="mc-front-card">
-    <h4>2) Source + Compose</h4>
-    <p>Find matching products by budget and generate a coherent moodboard with placement guidance.</p>
+    <h4>2) Plan + Source</h4>
+    <p>Style Agent sets design direction. Retail Curator finds budget-fit accessories with links.</p>
   </div>
   <div class="mc-front-card">
-    <h4>3) Evaluate + Improve</h4>
-    <p>Track answer quality by prompt, rank agent performance, and tune models/creativity in real time.</p>
+    <h4>3) Generate + Choose</h4>
+    <p>Finalizer creates 3 room options. You select favorites and review quality in Diagnostics.</p>
   </div>
 </div>
 """,
