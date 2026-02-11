@@ -286,6 +286,18 @@ def retrieve_image_matches(vs: Chroma, query: str, top_k: int = 8) -> list[dict]
     return out
 
 
+def retrieve_image_cues(vs: Chroma, query: str, top_k: int = 6) -> str:
+    docs = vs.similarity_search(query, k=top_k)
+    snippets = []
+    for d in docs:
+        txt = (d.page_content or "").strip()
+        if txt:
+            snippets.append(txt[:180])
+    if not snippets:
+        return "no retrieved visual cues"
+    return " | ".join(snippets[:4])
+
+
 def run_live_web_search(api_key: str, question: str, llm_model: str) -> str:
     client = OpenAI(api_key=api_key)
     web_prompt = (
@@ -327,6 +339,7 @@ def generate_moodboard_image(
     image_context: str = "",
     hf_token: str = "",
     variation_note: str = "",
+    lock_to_image_layout: bool = False,
 ) -> bytes:
     design_profile = {
         "Modern": "clean lines, neutral tones, minimal clutter",
@@ -347,6 +360,7 @@ def generate_moodboard_image(
     mats = ", ".join(style_dna.get("materials", [])[:5])
     prompt = (
         "Create a high-quality photoreal interior render (not text poster). "
+        f"MUST STRICTLY follow the selected design type and do not drift to generic modern unless explicitly asked. "
         f"Design type: {design_type}. "
         f"User request: {user_intent or 'interior redesign concept'}. "
         f"Reference from uploaded image retrieval: {image_context or 'no uploaded reference available'}. "
@@ -355,8 +369,14 @@ def generate_moodboard_image(
         f"Style tags: {', '.join(style_dna.get('style_tags', []))}. "
         f"Palette: {palette}. Materials: {mats}. "
         f"Include these accessories in scene: {top_items}. "
-        "Output a realistic room scene with cohesive furniture, decor, and lighting."
+        "Output a realistic room scene with cohesive furniture, decor, and lighting. "
+        "Do not add text in image."
     )
+    if lock_to_image_layout:
+        prompt += (
+            " Strongly preserve the uploaded room's layout, camera angle, architectural structure, "
+            "window/door positions, and major furniture placement while restyling materials/decor."
+        )
     if creativity >= 0.65:
         prompt += " Explore bolder composition, richer contrast, and more expressive styling details."
     elif creativity <= 0.25:
@@ -401,11 +421,12 @@ def generate_image_variants(
     user_intent: str,
     image_context: str,
     hf_token: str,
+    lock_to_image_layout: bool = False,
 ) -> list[bytes]:
     notes = [
-        "layout variant A, balanced composition",
-        "layout variant B, alternative furniture placement",
-        "layout variant C, alternate decor emphasis",
+        f"{design_type} variant A: symmetrical composition, calm lighting, restrained accents",
+        f"{design_type} variant B: asymmetrical composition, focal accent corner, layered textures",
+        f"{design_type} variant C: bolder decor contrast, alternate furniture arrangement",
     ]
     out: list[bytes] = []
     for i in range(count):
@@ -422,6 +443,7 @@ def generate_image_variants(
                 image_context=image_context,
                 hf_token=hf_token,
                 variation_note=notes[i % len(notes)],
+                lock_to_image_layout=lock_to_image_layout,
             )
         )
     return out
@@ -489,6 +511,7 @@ def run_three_agent_consensus(
     selected_decor_types: list[str],
     budget_min: int,
     budget_max: int,
+    image_cues: str = "",
 ) -> dict:
     vision_fallback = {
         "style_cues": [design_type.lower(), "natural_textures"],
@@ -517,7 +540,13 @@ def run_three_agent_consensus(
         llm_model=llm_model,
         role="Style Agent",
         schema_hint='{"target_style":"","must_keep":[],"avoid":[],"do":[],"budget":{"min":0,"max":0}}',
-        payload={"user_prompt": user_prompt, "vision": vision, "design_type": design_type, "budget": [budget_min, budget_max]},
+        payload={
+            "user_prompt": user_prompt,
+            "vision": vision,
+            "design_type": design_type,
+            "budget": [budget_min, budget_max],
+            "image_cues": image_cues,
+        },
         fallback=style_fallback,
     )
 
@@ -533,11 +562,15 @@ def run_three_agent_consensus(
         llm_model=llm_model,
         role="Retail Curator Agent",
         schema_hint='{"categories":[],"material_preferences":[],"size_constraints":{},"retailer_queries":[],"alternatives":{}}',
-        payload={"vision": vision, "style": style, "user_prompt": user_prompt},
+        payload={"vision": vision, "style": style, "user_prompt": user_prompt, "image_cues": image_cues},
         fallback=retail_fallback,
     )
 
-    style_seed = f"{design_type} {user_prompt} {style.get('target_style', design_type)} {' '.join(vision.get('style_cues', []))}"
+    style_seed = (
+        f"{design_type} {user_prompt} {style.get('target_style', design_type)} "
+        f"{' '.join(vision.get('style_cues', []))} image_cues={image_cues}"
+    )
+    style_seed = f"design_type={design_type}. target_style={style.get('target_style', design_type)}. {style_seed}"
     style_dna = analyze_style_dna(style_seed)
     decor = selected_decor_types or retail.get("categories", []) or style_dna.get("decor_types", ["rug", "lamp", "console"])
     products = search_products(style_dna, decor, budget_min, budget_max)
@@ -759,6 +792,7 @@ with st.sidebar:
             options=decor_options,
             default=["rug", "lamp", "console"],
         )
+        lock_to_image_layout = st.toggle("Lock to Uploaded Image Layout", value=False)
         auto_qaeval = st.checkbox("Auto QAEval", value=True)
 
     st.markdown("---")
@@ -797,6 +831,7 @@ with tab_design:
         else:
             try:
                 matches = []
+                image_cues = "no uploaded visual cues"
                 if q_uploads:
                     vs = get_image_vector_store(api_key)
                     for f in q_uploads:
@@ -804,6 +839,7 @@ with tab_design:
                         ids = [str(uuid.uuid4()) for _ in docs]
                         vs.add_documents(docs, ids=ids)
                     matches = retrieve_image_matches(vs, q_prompt, top_k=8)
+                    image_cues = retrieve_image_cues(vs, q_prompt, top_k=6)
 
                 matched_image = matches[0]["image_name"] if matches else "none"
                 pipeline = run_three_agent_consensus(
@@ -815,6 +851,7 @@ with tab_design:
                     selected_decor_types=selected_decor_types,
                     budget_min=budget_min,
                     budget_max=budget_max,
+                    image_cues=image_cues,
                 )
                 style_dna = pipeline["style_dna"]
                 products = pipeline["products"]
@@ -837,8 +874,14 @@ with tab_design:
                         image_model=image_model,
                         creativity=q_creativity,
                         user_intent=q_prompt,
-                        image_context=f"best_match={matched_image}; scores={matches[:3]}" if matches else "no match",
+                        image_context=(
+                            f"best_match={matched_image}; scores={matches[:3]}; "
+                            f"retrieved_visual_cues={image_cues}"
+                        )
+                        if matches
+                        else f"no match; retrieved_visual_cues={image_cues}",
                         hf_token=hf_token,
+                        lock_to_image_layout=lock_to_image_layout,
                     )
 
                 st.session_state.quick_generated_images = quick_images
@@ -846,6 +889,7 @@ with tab_design:
                     "prompt": q_prompt,
                     "matches": matches,
                     "matched_image": matched_image,
+                    "image_cues": image_cues,
                     "style_dna": style_dna,
                     "products": products,
                     "board": board,
@@ -970,6 +1014,9 @@ with tab_design:
         if matches:
             st.markdown("### Closest Match From Your Uploaded Images")
             st.dataframe(pd.DataFrame(matches), use_container_width=True)
+            if qctx.get("image_cues"):
+                st.markdown("### Retrieved Visual Cues Used")
+                st.caption(qctx.get("image_cues"))
 
         products = qctx.get("products", [])
         board = qctx.get("board", {})
@@ -1214,6 +1261,7 @@ if False:
                     user_intent=f"{design_type} interior moodboard",
                     image_context="manual moodboard generation tab",
                     hf_token=hf_token,
+                    lock_to_image_layout=lock_to_image_layout,
                 )
                 st.session_state.generated_board_image = img_bytes
                 st.success("Moodboard image generated.")
