@@ -348,6 +348,8 @@ def generate_moodboard_image(
     hf_token: str = "",
     variation_note: str = "",
     lock_to_image_layout: bool = False,
+    reference_image_bytes: bytes | None = None,
+    use_direct_reference: bool = False,
 ) -> bytes:
     design_profile = {
         "Modern": "clean lines, neutral tones, minimal clutter",
@@ -413,7 +415,32 @@ def generate_moodboard_image(
         return resp.content
 
     client = OpenAI(api_key=api_key)
-    resp = client.images.generate(model=image_model, prompt=prompt, size="1024x1024")
+    style_mode = "vivid" if creativity >= 0.55 else "natural"
+    if (
+        use_direct_reference
+        and reference_image_bytes
+        and image_backend == "OpenAI"
+    ):
+        try:
+            resp = client.images.edit(
+                model=image_model,
+                image=("reference.png", reference_image_bytes, "image/png"),
+                prompt=prompt,
+                size="1024x1024",
+                quality="high",
+            )
+            b64 = resp.data[0].b64_json
+            return base64.b64decode(b64)
+        except Exception:
+            pass
+
+    resp = client.images.generate(
+        model=image_model,
+        prompt=prompt,
+        size="1024x1024",
+        style=style_mode,
+        quality="high",
+    )
     b64 = resp.data[0].b64_json
     return base64.b64decode(b64)
 
@@ -431,6 +458,8 @@ def generate_image_variants(
     image_context: str,
     hf_token: str,
     lock_to_image_layout: bool = False,
+    reference_image_bytes: bytes | None = None,
+    use_direct_reference: bool = False,
 ) -> list[bytes]:
     notes = [
         f"{design_type} variant A: symmetrical composition, calm lighting, restrained accents",
@@ -453,6 +482,8 @@ def generate_image_variants(
                 hf_token=hf_token,
                 variation_note=notes[i % len(notes)],
                 lock_to_image_layout=lock_to_image_layout,
+                reference_image_bytes=reference_image_bytes,
+                use_direct_reference=use_direct_reference,
             )
         )
     return out
@@ -802,6 +833,7 @@ with st.sidebar:
             default=["rug", "lamp", "console"],
         )
         lock_to_image_layout = st.toggle("Lock to Uploaded Image Layout", value=False)
+        use_direct_reference = st.toggle("Use Uploaded Image as Direct Reference (OpenAI)", value=True)
         auto_qaeval = st.checkbox("Auto QAEval", value=True)
 
     st.markdown("---")
@@ -830,6 +862,8 @@ with tab_design:
         accept_multiple_files=True,
         key="quick_design_uploader",
     )
+    if use_direct_reference and not q_uploads:
+        st.caption("Direct reference mode is ON. Upload at least one image to apply reference-guided generation.")
     q_creativity = st.slider("Creativity (Quick Flow)", 0.0, 1.0, creativity_level, 0.05)
 
     if st.button("Generate My Design", use_container_width=True):
@@ -841,7 +875,9 @@ with tab_design:
             try:
                 matches = []
                 image_cues = "no uploaded visual cues"
+                reference_image_bytes = None
                 if q_uploads:
+                    reference_image_bytes = q_uploads[0].getvalue()
                     vs = get_image_vector_store(api_key)
                     for f in q_uploads:
                         docs = chunk_image_to_documents(f.getvalue(), f.name, q_prompt, grid=3)
@@ -897,6 +933,8 @@ with tab_design:
                         else _clip(f"no match; retrieved_visual_cues={image_cues}", 700),
                         hf_token=hf_token,
                         lock_to_image_layout=lock_to_image_layout,
+                        reference_image_bytes=reference_image_bytes,
+                        use_direct_reference=use_direct_reference,
                     )
 
                 st.session_state.quick_generated_images = quick_images
