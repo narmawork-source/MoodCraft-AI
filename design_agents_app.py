@@ -224,6 +224,15 @@ def load_avatar_data_uri(path: str) -> str:
     return f"data:image/svg+xml;base64,{b}"
 
 
+def resolve_secret(name: str) -> str:
+    try:
+        from_secrets = str(st.secrets.get(name, ""))
+    except Exception:
+        from_secrets = ""
+    from_env = os.getenv(name, "")
+    return (from_secrets or from_env).strip()
+
+
 def get_image_vector_store(api_key: str) -> Chroma:
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", api_key=api_key)
     return Chroma(
@@ -762,16 +771,16 @@ def render_feedback_controls(scope: str, question: str, answer: str):
 
 with st.sidebar:
     st.subheader("Control Center")
-    api_key = st.text_input("OpenAI API Key", value=os.getenv("OPENAI_API_KEY", ""), type="password")
+    api_key = resolve_secret("OPENAI_API_KEY")
+    hf_token = resolve_secret("HF_API_TOKEN")
+    if api_key:
+        st.caption("OpenAI key loaded from secrets/env.")
+    else:
+        st.warning("Missing OPENAI_API_KEY in Streamlit secrets or environment.")
     with st.expander("Settings", expanded=True):
         image_backend = st.selectbox("Image Backend", ["OpenAI", "Diffusion (HF SDXL)"], index=0)
-        hf_token = st.text_input(
-            "HuggingFace API Token (for diffusion backend)",
-            value=os.getenv("HF_API_TOKEN", ""),
-            type="password",
-        )
         if image_backend == "Diffusion (HF SDXL)" and not hf_token:
-            st.caption("Add HF token to use diffusion backend.")
+            st.caption("Missing HF_API_TOKEN in secrets/env for diffusion backend.")
         llm_model = st.selectbox(
             "LLM Model",
             ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"],
