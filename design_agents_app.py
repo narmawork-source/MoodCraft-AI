@@ -862,6 +862,12 @@ with tab_design:
                 st.session_state.style_dna = style_dna
                 st.session_state.products = products
                 st.session_state.board = board
+                final_design_brief = (
+                    f"{synthesis.get('final_design_brief', '')}. "
+                    f"Recommended direction: {synthesis.get('recommended_direction', '')}. "
+                    f"Checklist: {synthesis.get('shopping_checklist', [])}."
+                ).strip()
+                generation_intent = f"{q_prompt}. {final_design_brief}"
 
                 with st.spinner("Generating 3 design options..."):
                     quick_images = generate_image_variants(
@@ -873,7 +879,7 @@ with tab_design:
                         image_backend=image_backend,
                         image_model=image_model,
                         creativity=q_creativity,
-                        user_intent=q_prompt,
+                        user_intent=generation_intent,
                         image_context=(
                             f"best_match={matched_image}; scores={matches[:3]}; "
                             f"retrieved_visual_cues={image_cues}"
@@ -895,6 +901,8 @@ with tab_design:
                     "board": board,
                     "agent_messages": agent_messages,
                     "synthesis": synthesis,
+                    "final_design_brief": final_design_brief,
+                    "generation_intent": generation_intent,
                 }
                 st.session_state.usage_log.append(
                     {
@@ -1038,6 +1046,9 @@ with tab_design:
             f"Retail Agent sourced {len(products)} items. "
             f"Moodboard Agent prepared {len(board.get('board_items', []))} placements."
         )
+        if qctx.get("generation_intent"):
+            st.markdown("### Generation Prompt Used (Aligned Output)")
+            st.caption(qctx.get("generation_intent"))
         if qctx.get("synthesis"):
             st.markdown("### Final Design Brief (Consensus)")
             st.write(qctx["synthesis"].get("final_design_brief", ""))
