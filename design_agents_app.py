@@ -415,7 +415,6 @@ def generate_moodboard_image(
         return resp.content
 
     client = OpenAI(api_key=api_key)
-    style_mode = "vivid" if creativity >= 0.55 else "natural"
     if (
         use_direct_reference
         and reference_image_bytes
@@ -427,7 +426,6 @@ def generate_moodboard_image(
                 image=("reference.png", reference_image_bytes, "image/png"),
                 prompt=prompt,
                 size="1024x1024",
-                quality="high",
             )
             b64 = resp.data[0].b64_json
             return base64.b64decode(b64)
@@ -438,8 +436,6 @@ def generate_moodboard_image(
         model=image_model,
         prompt=prompt,
         size="1024x1024",
-        style=style_mode,
-        quality="high",
     )
     b64 = resp.data[0].b64_json
     return base64.b64decode(b64)
