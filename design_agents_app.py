@@ -295,7 +295,15 @@ def retrieve_image_cues(vs: Chroma, query: str, top_k: int = 6) -> str:
             snippets.append(txt[:180])
     if not snippets:
         return "no retrieved visual cues"
-    return " | ".join(snippets[:4])
+    joined = " | ".join(snippets[:4])
+    return joined[:700]
+
+
+def _clip(text: str, limit: int) -> str:
+    t = text or ""
+    if len(t) <= limit:
+        return t
+    return t[: limit - 3] + "..."
 
 
 def run_live_web_search(api_key: str, question: str, llm_model: str) -> str:
@@ -381,6 +389,7 @@ def generate_moodboard_image(
         prompt += " Explore bolder composition, richer contrast, and more expressive styling details."
     elif creativity <= 0.25:
         prompt += " Keep the layout highly practical, minimal, and conservative."
+    prompt = _clip(prompt, 3900)
     if image_backend == "Diffusion (HF SDXL)":
         if not hf_token:
             raise ValueError("HF token is required for Diffusion backend.")
@@ -867,7 +876,7 @@ with tab_design:
                     f"Recommended direction: {synthesis.get('recommended_direction', '')}. "
                     f"Checklist: {synthesis.get('shopping_checklist', [])}."
                 ).strip()
-                generation_intent = f"{q_prompt}. {final_design_brief}"
+                generation_intent = _clip(f"{q_prompt}. {final_design_brief}", 900)
 
                 with st.spinner("Generating 3 design options..."):
                     quick_images = generate_image_variants(
@@ -881,11 +890,11 @@ with tab_design:
                         creativity=q_creativity,
                         user_intent=generation_intent,
                         image_context=(
-                            f"best_match={matched_image}; scores={matches[:3]}; "
+                            f"best_match={matched_image}; scores={str(matches[:3])[:300]}; "
                             f"retrieved_visual_cues={image_cues}"
                         )
                         if matches
-                        else f"no match; retrieved_visual_cues={image_cues}",
+                        else _clip(f"no match; retrieved_visual_cues={image_cues}", 700),
                         hf_token=hf_token,
                         lock_to_image_layout=lock_to_image_layout,
                     )
