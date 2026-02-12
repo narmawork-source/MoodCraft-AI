@@ -301,8 +301,12 @@ user_namespace = ensure_user_namespace()
 
 with st.sidebar:
     st.header("Configuration")
-    default_key = resolve_api_key()
-    api_key = st.text_input("OpenAI API Key", value=default_key, type="password")
+    api_key = resolve_api_key()
+    if api_key:
+        st.caption("OpenAI key loaded from secrets/env.")
+    else:
+        st.warning("Missing OPENAI_API_KEY in Streamlit secrets or environment.")
+
     prompt_mode = st.radio("Prompt Type", ["Single Prompt", "Reasoning Prompt"], index=0)
     chunk_size = st.slider("Chunk Size", min_value=300, max_value=2000, value=900, step=100)
     chunk_overlap = st.slider("Chunk Overlap", min_value=0, max_value=400, value=150, step=25)
