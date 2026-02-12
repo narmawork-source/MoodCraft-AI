@@ -693,7 +693,11 @@ def render_feedback_controls(scope: str, question: str, answer: str):
 
 with st.sidebar:
     st.subheader("Control Center")
-    api_key = st.text_input("OpenAI API Key", value=os.getenv("OPENAI_API_KEY", ""), type="password")
+    api_key = os.getenv("OPENAI_API_KEY", "")
+    if api_key:
+        st.caption("OpenAI key loaded from environment/secrets.")
+    else:
+        st.warning("Missing OPENAI_API_KEY in environment/secrets.")
     with st.expander("Settings", expanded=True):
         image_backend = st.selectbox("Image Backend", ["OpenAI", "Diffusion (HF SDXL)"], index=0)
         hf_token = st.text_input(
