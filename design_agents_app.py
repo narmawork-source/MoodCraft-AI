@@ -104,19 +104,27 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
   margin-bottom: .9rem;
 }
 .mc-front-card {
-  background: #ffffff;
-  border: 1px solid #e7ddcf;
+  background: linear-gradient(180deg, #fffaf2 0%, #f8eee1 100%);
+  border: 1px solid #e2cfb3;
   border-radius: 14px;
   padding: .85rem .95rem;
-  box-shadow: 0 6px 16px rgba(40,48,67,.06);
+  box-shadow: 0 6px 16px rgba(94,74,45,.08);
 }
 .mc-step-card {
-  background: linear-gradient(180deg, #fffdf8 0%, #faf4e9 100%);
-  border: 1px solid #ecdcc3;
+  background: linear-gradient(180deg, #fff8ef 0%, #f9ede0 100%);
+  border: 1px solid #e3c9a4;
   border-radius: 14px;
   padding: .8rem .9rem;
-  box-shadow: 0 4px 12px rgba(40,48,67,.05);
+  box-shadow: 0 4px 12px rgba(94,74,45,.08);
   margin-bottom: .65rem;
+}
+.mc-step-card.step2 {
+  background: linear-gradient(180deg, #f8f4ec 0%, #eee6d8 100%);
+  border-color: #d8c7a9;
+}
+.mc-step-card.step3 {
+  background: linear-gradient(180deg, #f5f1ea 0%, #e8dfd0 100%);
+  border-color: #d0bea0;
 }
 .mc-front-card h4 {
   margin: .1rem 0 .35rem 0;
@@ -143,8 +151,8 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
   object-fit: cover;
 }
 .mc-card {
-  background: #ffffff;
-  border: 1px solid #e8dfd3;
+  background: linear-gradient(180deg, #fffaf3 0%, #f7ede0 100%);
+  border: 1px solid #e1ceb3;
   border-radius: 14px;
   padding: .8rem 1rem;
 }
@@ -897,6 +905,7 @@ with st.sidebar:
             options=decor_options,
             default=["rug", "lamp", "console"],
         )
+        fast_mode = st.toggle("Fast Mode (quicker response)", value=False)
         lock_to_image_layout = st.toggle("Lock to Uploaded Image Layout", value=False)
         use_direct_reference = st.toggle("Use Uploaded Image as Direct Reference (OpenAI)", value=True)
         auto_qaeval = st.checkbox("Auto QAEval", value=True)
@@ -919,6 +928,8 @@ tab_design, tab_diag, tab_agents, tab_arch = st.tabs(["Design Studio", "Diagnost
 with tab_design:
     st.subheader("Quick Design Studio")
     st.caption("Follow 3 simple steps: write request, upload images, generate.")
+    if fast_mode:
+        st.info("Fast Mode is ON: fewer retrieval docs, fewer generated images, and QAEval is skipped for speed.")
 
     if "quick_prompt_text" not in st.session_state:
         st.session_state.quick_prompt_text = ""
@@ -963,6 +974,8 @@ with tab_design:
         st.caption("You can also ask edits like: 'Make it brighter', 'Add more storage', 'Keep same layout but change to japandi'.")
 
     with st.expander("Step 2: Upload Room / Inspiration Images", expanded=True):
+        st.markdown('<div class="mc-step-card step2">', unsafe_allow_html=True)
+        st.markdown("**Step 2: Upload room and/or inspiration images**")
         upload_mode = st.radio(
             "Uploaded Image Intent",
             ["My Room (visualize my room)", "Inspiration Sample (style idea)", "Both"],
@@ -986,8 +999,11 @@ with tab_design:
         )
         if use_direct_reference and not room_upload and not inspiration_uploads:
             st.caption("Direct reference mode is ON. Upload at least one image to apply reference-guided generation.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with st.expander("Step 3: Generation Options", expanded=False):
+        st.markdown('<div class="mc-step-card step3">', unsafe_allow_html=True)
+        st.markdown("**Step 3: Tune generation speed and creativity**")
         q_creativity = st.slider(
             "Creativity (Quick Flow)",
             0.0,
@@ -998,6 +1014,7 @@ with tab_design:
             on_change=sync_creativity_from_quick,
         )
         st.caption("Lower creativity = practical designs. Higher creativity = bolder ideas.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     if st.button("Generate My Design", use_container_width=True):
         if not api_key:
@@ -1043,8 +1060,10 @@ with tab_design:
                             failed_uploads.append(f"{f.name} ({str(file_exc)[:80]})")
                             continue
                     if indexed_any:
-                        matches = retrieve_image_matches(vs, q_prompt, top_k=8)
-                        image_cues = retrieve_image_cues(vs, q_prompt, top_k=6)
+                        retrieval_k = 4 if fast_mode else 8
+                        cue_k = 3 if fast_mode else 6
+                        matches = retrieve_image_matches(vs, q_prompt, top_k=retrieval_k)
+                        image_cues = retrieve_image_cues(vs, q_prompt, top_k=cue_k)
 
                 matched_image = matches[0]["image_name"] if matches else "none"
                 effective_lock_to_layout = (
@@ -1081,8 +1100,9 @@ with tab_design:
                 generation_intent = _clip(f"{q_prompt}. {final_design_brief}", 900)
 
                 with st.spinner("Generating 3 design options..."):
+                    variant_count = 1 if fast_mode else 3
                     quick_images = generate_image_variants(
-                        count=3,
+                        count=variant_count,
                         api_key=api_key,
                         design_type=design_type,
                         style_dna=style_dna,
@@ -1136,7 +1156,7 @@ with tab_design:
                         "conflict_count": len(synthesis.get("resolved_conflicts", [])),
                     }
                 )
-                if auto_qaeval and api_key:
+                if auto_qaeval and api_key and not fast_mode:
                     prediction = (
                         f"Final brief: {synthesis.get('final_design_brief', '')}. "
                         f"Resolved conflicts: {synthesis.get('resolved_conflicts', [])}. "
@@ -1189,8 +1209,9 @@ with tab_design:
 
     if st.session_state.quick_generated_images:
         qctx = st.session_state.quick_context
-        st.markdown("### Your New Room Concepts (3 Options)")
-        img_cols = st.columns(3)
+        option_count = len(st.session_state.quick_generated_images)
+        st.markdown(f"### Your New Room Concepts ({option_count} Option{'s' if option_count != 1 else ''})")
+        img_cols = st.columns(option_count)
         for i, img_bytes in enumerate(st.session_state.quick_generated_images):
             with img_cols[i]:
                 st.image(img_bytes, caption=f"Option {i + 1}: {qctx.get('prompt', '')}", use_container_width=True)
@@ -1226,7 +1247,8 @@ with tab_design:
                             }
                         )
 
-        favorite = st.radio("Pick your favorite image option", ["Option 1", "Option 2", "Option 3"], horizontal=True)
+        favorite_opts = [f"Option {i+1}" for i in range(option_count)]
+        favorite = st.radio("Pick your favorite image option", favorite_opts, horizontal=True)
         if st.button("Save Favorite", use_container_width=False, key="quick_favorite_btn"):
             st.session_state.feedback_log.append(
                 {
