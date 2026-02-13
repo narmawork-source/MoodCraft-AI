@@ -68,6 +68,11 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
 .stApp [data-testid="stSidebar"] * {
   color: var(--ink) !important;
 }
+.stApp [data-testid="stSidebar"],
+.stApp [data-testid="stSidebarContent"] {
+  background: linear-gradient(180deg, #eef6ff 0%, #e4f0fb 100%) !important;
+  border-right: 1px solid #b7cde8;
+}
 .block-container { padding-top: 1.2rem; max-width: 1200px; }
 .mc-hero {
   background:
@@ -111,20 +116,20 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
   box-shadow: 0 6px 16px rgba(45, 89, 130, .08);
 }
 .mc-step-card {
-  background: linear-gradient(180deg, #fff8ef 0%, #f9ede0 100%);
-  border: 1px solid #e3c9a4;
+  background: linear-gradient(180deg, #f1f8ff 0%, #e5f0fb 100%);
+  border: 1px solid #b7cde8;
   border-radius: 14px;
   padding: .8rem .9rem;
-  box-shadow: 0 4px 12px rgba(94,74,45,.08);
+  box-shadow: 0 4px 12px rgba(45, 89, 130, .08);
   margin-bottom: .65rem;
 }
 .mc-step-card.step2 {
-  background: linear-gradient(180deg, #f8f4ec 0%, #eee6d8 100%);
-  border-color: #d8c7a9;
+  background: linear-gradient(180deg, #edf6ff 0%, #dfecf9 100%);
+  border-color: #b7cde8;
 }
 .mc-step-card.step3 {
-  background: linear-gradient(180deg, #f5f1ea 0%, #e8dfd0 100%);
-  border-color: #d0bea0;
+  background: linear-gradient(180deg, #edf6ff 0%, #dfecf9 100%);
+  border-color: #b7cde8;
 }
 .mc-front-card h4 {
   margin: .1rem 0 .35rem 0;
@@ -147,12 +152,12 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
   width: 44px;
   height: 44px;
   border-radius: 999px;
-  border: 1px solid #e3d8c9;
+  border: 1px solid #b7cde8;
   object-fit: cover;
 }
 .mc-card {
-  background: linear-gradient(180deg, #fffaf3 0%, #f7ede0 100%);
-  border: 1px solid #e1ceb3;
+  background: linear-gradient(180deg, #f1f8ff 0%, #e5f0fb 100%);
+  border: 1px solid #b7cde8;
   border-radius: 14px;
   padding: .8rem 1rem;
 }
@@ -166,34 +171,34 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
   font-size: .82rem;
 }
 .mc-step {
-  background: #faf8f4;
-  border-left: 4px solid var(--warm);
+  background: #f2f8ff;
+  border-left: 4px solid #b7cde8;
   border-radius: 8px;
   padding: .55rem .75rem;
   margin-bottom: .5rem;
 }
 /* Strong, visible backgrounds for step expanders */
 div[data-testid="stExpander"] {
-  background: linear-gradient(180deg, #f8f4ec 0%, #eee6d8 100%);
-  border: 1px solid #d8c7a9;
+  background: linear-gradient(180deg, #f1f8ff 0%, #e5f0fb 100%);
+  border: 1px solid #b7cde8;
   border-radius: 14px;
   padding: 4px 6px;
   margin-bottom: 10px;
 }
 div[data-testid="stExpander"] details > summary {
-  background: linear-gradient(180deg, #e9d0ae 0%, #dfc19a 100%);
-  border: 1px solid #cfae81;
+  background: linear-gradient(180deg, #eaf4ff 0%, #dceafb 100%);
+  border: 1px solid #b7cde8;
   border-radius: 10px;
   padding: .4rem .65rem;
 }
 div[data-testid="stExpander"] details > div {
-  background: rgba(255, 249, 238, 0.9);
+  background: rgba(242, 248, 255, 0.92);
   border-radius: 10px;
   padding: .35rem .35rem .2rem .35rem;
 }
 .mc-arch {
   background: #ffffff;
-  border: 1px solid #e6dbc8;
+  border: 1px solid #b7cde8;
   border-radius: 14px;
   padding: .9rem 1rem;
   box-shadow: 0 4px 12px rgba(40,48,67,.05);
