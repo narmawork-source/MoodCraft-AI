@@ -267,6 +267,10 @@ def resolve_secret(name: str) -> str:
     return (from_secrets or from_env).strip()
 
 
+def set_quick_prompt(text: str):
+    st.session_state.quick_prompt_text = text
+
+
 def get_image_vector_store(api_key: str) -> Chroma:
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", api_key=api_key)
     return Chroma(
@@ -917,17 +921,29 @@ with tab_design:
         st.caption("Try an example, then edit it:")
         ex_cols = st.columns(3)
         with ex_cols[0]:
-            if st.button("Modern + Cozy", use_container_width=True, key="prompt_ex_modern"):
-                st.session_state.quick_prompt_text = "Design a modern cozy living room with warm lights, neutral rug, and wood accents."
-                st.rerun()
+            st.button(
+                "Modern + Cozy",
+                use_container_width=True,
+                key="prompt_ex_modern",
+                on_click=set_quick_prompt,
+                args=("Design a modern cozy living room with warm lights, neutral rug, and wood accents.",),
+            )
         with ex_cols[1]:
-            if st.button("Pooja Room", use_container_width=True, key="prompt_ex_pooja"):
-                st.session_state.quick_prompt_text = "Create a serene pooja room with traditional elements, soft lighting, and compact storage."
-                st.rerun()
+            st.button(
+                "Pooja Room",
+                use_container_width=True,
+                key="prompt_ex_pooja",
+                on_click=set_quick_prompt,
+                args=("Create a serene pooja room with traditional elements, soft lighting, and compact storage.",),
+            )
         with ex_cols[2]:
-            if st.button("Luxury Refresh", use_container_width=True, key="prompt_ex_luxury"):
-                st.session_state.quick_prompt_text = "Give this room a luxury refresh with elegant textures, statement lighting, and premium finishes."
-                st.rerun()
+            st.button(
+                "Luxury Refresh",
+                use_container_width=True,
+                key="prompt_ex_luxury",
+                on_click=set_quick_prompt,
+                args=("Give this room a luxury refresh with elegant textures, statement lighting, and premium finishes.",),
+            )
         st.caption("You can also ask edits like: 'Make it brighter', 'Add more storage', 'Keep same layout but change to japandi'.")
 
     with st.expander("Step 2: Upload Room / Inspiration Images", expanded=True):
