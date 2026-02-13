@@ -43,6 +43,34 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
     radial-gradient(1200px 500px at 95% -10%, #dbe9ff 0%, rgba(219,233,255,0) 60%),
     radial-gradient(900px 450px at -15% 12%, #ffe4c8 0%, rgba(255,228,200,0) 58%),
     linear-gradient(180deg, #fbfaf7 0%, #f7f3ec 100%);
+  color: var(--ink) !important;
+}
+.stApp [data-testid="stAppViewContainer"],
+.stApp [data-testid="stMainBlockContainer"],
+.stApp [data-testid="stSidebar"],
+.stApp [data-testid="stMarkdownContainer"],
+.stApp [data-testid="stText"],
+.stApp [data-testid="stMetricLabel"],
+.stApp [data-testid="stMetricValue"],
+.stApp p,
+.stApp span,
+.stApp div,
+.stApp li,
+.stApp label,
+.stApp h1,
+.stApp h2,
+.stApp h3,
+.stApp h4,
+.stApp h5,
+.stApp h6 {
+  color: var(--ink) !important;
+}
+.stApp [data-testid="stSidebar"] * {
+  color: var(--ink) !important;
+}
+.mc-hero,
+.mc-hero * {
+  color: #ffffff !important;
 }
 .block-container { padding-top: 1.2rem; max-width: 1200px; }
 .mc-hero {
@@ -212,6 +240,12 @@ if "quick_context" not in st.session_state:
     st.session_state.quick_context = {}
 if "usage_log" not in st.session_state:
     st.session_state.usage_log = []
+if "creativity_enabled" not in st.session_state:
+    st.session_state.creativity_enabled = False
+if "creativity_level" not in st.session_state:
+    st.session_state.creativity_level = 0.0
+if "quick_creativity_level" not in st.session_state:
+    st.session_state.quick_creativity_level = 0.0
 
 IMAGE_VDB_DIR = "moodcraft_image_vdb"
 IMAGE_COLLECTION = "moodcraft_image_chunks"
@@ -278,6 +312,15 @@ def chunk_image_to_documents(image_bytes: bytes, image_name: str, prompt_hint: s
             )
             idx += 1
     return docs
+
+
+def normalize_reference_image(image_bytes: bytes, max_side: int = 1536) -> bytes:
+    """Normalize uploads (jpg/png/etc.) to a consistent PNG for image-edit APIs."""
+    img = Image.open(BytesIO(image_bytes)).convert("RGB")
+    img.thumbnail((max_side, max_side))
+    out = BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue()
 
 
 def retrieve_image_matches(vs: Chroma, query: str, top_k: int = 8) -> list[dict]:
@@ -791,14 +834,15 @@ with st.sidebar:
             ["gpt-image-1", "dall-e-3"],
             index=0,
         )
-        creativity_enabled = st.toggle("Creativity Mode", value=False)
+        creativity_enabled = st.toggle("Creativity Mode", key="creativity_enabled")
         creativity_level = st.slider(
             "Creativity Level",
             0.0,
             1.0,
-            0.7 if creativity_enabled else 0.0,
+            float(st.session_state.creativity_level),
             0.05,
             disabled=not creativity_enabled,
+            key="creativity_level",
         )
         design_type = st.selectbox(
             "Design Type",
@@ -842,11 +886,11 @@ with st.sidebar:
         auto_qaeval = st.checkbox("Auto QAEval", value=True)
 
     st.markdown("---")
-    st.markdown("**Workflow**")
-    st.markdown('<div class="mc-step">1. Run Agent 1 to generate design DNA.</div>', unsafe_allow_html=True)
-    st.markdown('<div class="mc-step">2. Run Agent 2 to source matching products.</div>', unsafe_allow_html=True)
-    st.markdown('<div class="mc-step">3. Run Agent 3 to compose moodboard.</div>', unsafe_allow_html=True)
-    st.markdown('<div class="mc-step">4. Ask questions and evaluate quality.</div>', unsafe_allow_html=True)
+    with st.expander("Quick Workflow", expanded=False):
+        st.markdown('<div class="mc-step">1) Enter prompt.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="mc-step">2) Upload room/inspiration image.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="mc-step">3) Click Generate My Design.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="mc-step">4) Review images, products, and diagnostics.</div>', unsafe_allow_html=True)
 
 
 style_avatar_uri = load_avatar_data_uri("design_agents/assets/style_avatar.svg")
@@ -858,18 +902,75 @@ tab_design, tab_diag, tab_agents, tab_arch = st.tabs(["Design Studio", "Diagnost
 
 with tab_design:
     st.subheader("Quick Design Studio")
-    st.caption("Simple flow: upload your room image, tell us what you want, and get a generated room concept plus accessories.")
+    st.caption("Follow 3 simple steps: write request, upload images, generate.")
 
-    q_prompt = st.text_input("What do you want to design?", value=f"{design_type.lower()} living room")
-    q_uploads = st.file_uploader(
-        "Upload room/inspiration image(s)",
-        type=["jpg", "jpeg", "png"],
-        accept_multiple_files=True,
-        key="quick_design_uploader",
-    )
-    if use_direct_reference and not q_uploads:
-        st.caption("Direct reference mode is ON. Upload at least one image to apply reference-guided generation.")
-    q_creativity = st.slider("Creativity (Quick Flow)", 0.0, 1.0, creativity_level, 0.05)
+    if "quick_prompt_text" not in st.session_state:
+        st.session_state.quick_prompt_text = f"Design a {design_type.lower()} living room with warm lighting and practical storage."
+
+    with st.expander("Step 1: Describe Your Design Goal", expanded=True):
+        q_prompt = st.text_area(
+            "Describe what you want to change",
+            key="quick_prompt_text",
+            height=120,
+            help="Type your request or choose an example and edit it.",
+        )
+        st.caption("Try an example, then edit it:")
+        ex_cols = st.columns(3)
+        with ex_cols[0]:
+            if st.button("Modern + Cozy", use_container_width=True, key="prompt_ex_modern"):
+                st.session_state.quick_prompt_text = "Design a modern cozy living room with warm lights, neutral rug, and wood accents."
+                st.rerun()
+        with ex_cols[1]:
+            if st.button("Pooja Room", use_container_width=True, key="prompt_ex_pooja"):
+                st.session_state.quick_prompt_text = "Create a serene pooja room with traditional elements, soft lighting, and compact storage."
+                st.rerun()
+        with ex_cols[2]:
+            if st.button("Luxury Refresh", use_container_width=True, key="prompt_ex_luxury"):
+                st.session_state.quick_prompt_text = "Give this room a luxury refresh with elegant textures, statement lighting, and premium finishes."
+                st.rerun()
+        st.caption("You can also ask edits like: 'Make it brighter', 'Add more storage', 'Keep same layout but change to japandi'.")
+
+    with st.expander("Step 2: Upload Room / Inspiration Images", expanded=True):
+        upload_mode = st.radio(
+            "Uploaded Image Intent",
+            ["My Room (visualize my room)", "Inspiration Sample (style idea)", "Both"],
+            horizontal=True,
+        )
+        room_upload = st.file_uploader(
+            "Upload your room image",
+            type=["jpg", "jpeg", "png"],
+            accept_multiple_files=False,
+            key="quick_room_uploader",
+        )
+        inspiration_uploads = st.file_uploader(
+            "Upload inspiration image(s)",
+            type=["jpg", "jpeg", "png"],
+            accept_multiple_files=True,
+            key="quick_inspo_uploader",
+        )
+        retain_structure = st.toggle(
+            "Retain windows/doors/layout from my room image",
+            value=True if upload_mode in {"My Room (visualize my room)", "Both"} else False,
+        )
+        if use_direct_reference and not room_upload and not inspiration_uploads:
+            st.caption("Direct reference mode is ON. Upload at least one image to apply reference-guided generation.")
+
+    with st.expander("Step 3: Generation Options", expanded=False):
+        q_creativity = st.slider(
+            "Creativity (Quick Flow)",
+            0.0,
+            1.0,
+            float(st.session_state.quick_creativity_level),
+            0.05,
+            key="quick_creativity_level",
+        )
+        st.caption("Lower creativity = practical designs. Higher creativity = bolder ideas.")
+    if q_creativity > 0 and (
+        (not st.session_state.creativity_enabled)
+        or abs(float(st.session_state.creativity_level) - float(q_creativity)) > 1e-9
+    ):
+        st.session_state.creativity_enabled = True
+        st.session_state.creativity_level = float(q_creativity)
 
     if st.button("Generate My Design", use_container_width=True):
         if not api_key:
@@ -881,10 +982,26 @@ with tab_design:
                 matches = []
                 image_cues = "no uploaded visual cues"
                 reference_image_bytes = None
-                if q_uploads:
-                    reference_image_bytes = q_uploads[0].getvalue()
+                uploads_for_index = []
+                if room_upload is not None:
+                    uploads_for_index.append(room_upload)
+                if inspiration_uploads:
+                    uploads_for_index.extend(inspiration_uploads)
+
+                if uploads_for_index:
+                    if upload_mode in {"My Room (visualize my room)", "Both"} and room_upload is not None:
+                        try:
+                            reference_image_bytes = normalize_reference_image(room_upload.getvalue())
+                        except Exception:
+                            reference_image_bytes = room_upload.getvalue()
+                    elif upload_mode == "Inspiration Sample (style idea)" and inspiration_uploads:
+                        try:
+                            reference_image_bytes = normalize_reference_image(inspiration_uploads[0].getvalue())
+                        except Exception:
+                            reference_image_bytes = inspiration_uploads[0].getvalue()
+
                     vs = get_image_vector_store(api_key)
-                    for f in q_uploads:
+                    for f in uploads_for_index:
                         docs = chunk_image_to_documents(f.getvalue(), f.name, q_prompt, grid=3)
                         ids = [str(uuid.uuid4()) for _ in docs]
                         vs.add_documents(docs, ids=ids)
@@ -892,6 +1009,12 @@ with tab_design:
                     image_cues = retrieve_image_cues(vs, q_prompt, top_k=6)
 
                 matched_image = matches[0]["image_name"] if matches else "none"
+                effective_lock_to_layout = (
+                    retain_structure
+                    and room_upload is not None
+                    and upload_mode in {"My Room (visualize my room)", "Both"}
+                )
+                effective_direct_reference = bool(use_direct_reference and reference_image_bytes is not None)
                 pipeline = run_three_agent_consensus(
                     api_key=api_key,
                     llm_model=llm_model,
@@ -931,15 +1054,20 @@ with tab_design:
                         creativity=q_creativity,
                         user_intent=generation_intent,
                         image_context=(
+                            f"upload_mode={upload_mode}; retain_structure={effective_lock_to_layout}; "
                             f"best_match={matched_image}; scores={str(matches[:3])[:300]}; "
                             f"retrieved_visual_cues={image_cues}"
                         )
                         if matches
-                        else _clip(f"no match; retrieved_visual_cues={image_cues}", 700),
+                        else _clip(
+                            f"upload_mode={upload_mode}; retain_structure={effective_lock_to_layout}; "
+                            f"no match; retrieved_visual_cues={image_cues}",
+                            700,
+                        ),
                         hf_token=hf_token,
-                        lock_to_image_layout=lock_to_image_layout,
+                        lock_to_image_layout=effective_lock_to_layout or lock_to_image_layout,
                         reference_image_bytes=reference_image_bytes,
-                        use_direct_reference=use_direct_reference,
+                        use_direct_reference=effective_direct_reference,
                     )
 
                 st.session_state.quick_generated_images = quick_images
@@ -955,6 +1083,8 @@ with tab_design:
                     "synthesis": synthesis,
                     "final_design_brief": final_design_brief,
                     "generation_intent": generation_intent,
+                    "upload_mode": upload_mode,
+                    "retain_structure": effective_lock_to_layout,
                 }
                 st.session_state.usage_log.append(
                     {
@@ -1101,6 +1231,11 @@ with tab_design:
         if qctx.get("generation_intent"):
             st.markdown("### Generation Prompt Used (Aligned Output)")
             st.caption(qctx.get("generation_intent"))
+        if qctx.get("upload_mode"):
+            st.caption(
+                f"Generation mode: {qctx.get('upload_mode')} | "
+                f"Retain structure: {qctx.get('retain_structure')}"
+            )
         if qctx.get("synthesis"):
             st.markdown("### Final Design Brief (Consensus)")
             st.write(qctx["synthesis"].get("final_design_brief", ""))
@@ -1193,69 +1328,52 @@ with tab_agents:
 
 with tab_arch:
     st.subheader("Architecture")
-    st.caption("Technical overview of models, agent roles, MCP interfaces, and full data flow.")
-
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("### Models Used")
-        st.write(f"- LLM (configurable): `{llm_model}`")
-        st.write(f"- Image backend (configurable): `{image_backend}`")
-        st.write(f"- Image generation model (OpenAI mode): `{image_model}`")
-        st.write("- Image/text embeddings: `text-embedding-3-small`")
-        st.write("- QAEval judge model: `gpt-4.1-mini`")
-        st.write("- Live web search model: uses selected LLM model with web search tool")
-
-        st.markdown("### Agent Purpose")
-        st.write("- `Style Agent`: derives style tags, palette, materials, decor constraints from prompt/image context.")
-        st.write("- `Retail Agent`: ranks products by style fit and budget, returns links and pricing.")
-        st.write("- `Moodboard Agent`: composes board items and design story/placement guidance.")
-        st.write("- `Orchestrator`: combines retrieval + agent outputs into final answer.")
-
-    with c2:
-        st.markdown("### MCP Details")
-        st.write("- `mcp_style_server.py` exposes style interpretation tool endpoint.")
-        st.write("- `mcp_retail_server.py` exposes product sourcing tool endpoint.")
-        st.write("- `mcp_board_server.py` exposes moodboard composition tool endpoint.")
-        st.write("- Streamlit app acts as orchestrator/client calling these capabilities.")
-
-        st.markdown("### Vector & Storage")
-        st.write("- Uploaded images are tiled (3x3 chunks) into semantic descriptors.")
-        st.write("- Chunk descriptors are embedded and stored in Chroma vector DB.")
-        st.write("- Retrieval selects closest uploaded image context for personalization.")
-
-    st.markdown("### Architecture Highlighter")
+    st.caption("Simple view of how your request becomes final room designs and shopping suggestions.")
+    st.markdown("### Easy Flow")
     st.markdown(
         """
         <div class="mc-arch">
-          <b>1) Input Layer</b>: User prompt + image upload + design controls<br/>
-          <b>2) Retrieval Layer</b>: Image chunking -> embedding -> Chroma vector search<br/>
-          <b>3) Agent Layer</b>: Style Agent -> Retail Agent -> Moodboard Agent<br/>
-          <b>4) Generation Layer</b>: LLM response + generated room image<br/>
-          <b>5) Evaluation Layer</b>: QAEval + agent ranking + thumbs up/down analytics
+          <b>1) You Describe Goal</b>: Prompt + room/inspiration images<br/>
+          <b>2) System Understands Context</b>: Reads visual cues from uploaded images<br/>
+          <b>3) Agents Plan Design</b>: Vision -> Style -> Retail -> Finalizer<br/>
+          <b>4) You Get Results</b>: 3 design images + accessories with links<br/>
+          <b>5) You Improve</b>: Choose favorite and iterate with new prompt edits
         </div>
         """,
         unsafe_allow_html=True,
     )
+    st.markdown("### What Each Part Does")
+    st.write("- Prompt + Upload: defines user intent and room context.")
+    st.write("- Agent Collaboration: creates a design plan and product shortlist.")
+    st.write("- Image Generation: shows room options to help visualization.")
+    st.write("- Diagnostics: tracks quality and user feedback automatically.")
 
-    st.markdown("### End-to-End Flow")
-    st.code(
-        "User Upload/Prompt -> Chunk & Index -> Retrieve Similar Context -> "
-        "Style DNA -> Product Ranking -> Moodboard Plan -> New Image -> "
-        "Final Answer + Shopping Links -> QAEval + Feedback Metrics",
-        language="text",
-    )
+    with st.expander("Technical Details (Optional)"):
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("### Models Used")
+            st.write(f"- LLM (configurable): `{llm_model}`")
+            st.write(f"- Image backend: `{image_backend}`")
+            st.write(f"- Image model (OpenAI mode): `{image_model}`")
+            st.write("- Embeddings: `text-embedding-3-small`")
+            st.write("- QAEval judge: `gpt-4.1-mini`")
+        with c2:
+            st.markdown("### MCP + Storage")
+            st.write("- MCP servers provide style/retail/board tool interfaces.")
+            st.write("- Uploaded images are chunked and indexed in vector DB.")
+            st.write("- Retrieved cues are used during agent planning and generation.")
 
-    st.markdown("### Key Implementation Files")
-    st.code(
-        "design_agents_app.py\n"
-        "design_agents/style_agent.py\n"
-        "design_agents/retail_agent.py\n"
-        "design_agents/moodboard_agent.py\n"
-        "mcp_style_server.py\n"
-        "mcp_retail_server.py\n"
-        "mcp_board_server.py",
-        language="text",
-    )
+        st.markdown("### Key Files")
+        st.code(
+            "design_agents_app.py\n"
+            "design_agents/style_agent.py\n"
+            "design_agents/retail_agent.py\n"
+            "design_agents/moodboard_agent.py\n"
+            "mcp_style_server.py\n"
+            "mcp_retail_server.py\n"
+            "mcp_board_server.py",
+            language="text",
+        )
 
 if False:
     st.subheader("Style Interpreter")
