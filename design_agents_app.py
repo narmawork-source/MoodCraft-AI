@@ -40,9 +40,8 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
 }
 .stApp {
   background:
-    radial-gradient(1200px 500px at 95% -10%, #dbe9ff 0%, rgba(219,233,255,0) 60%),
-    radial-gradient(900px 450px at -15% 12%, #ffe4c8 0%, rgba(255,228,200,0) 58%),
-    linear-gradient(180deg, #fbfaf7 0%, #f7f3ec 100%);
+    radial-gradient(1200px 500px at 95% -10%, #eaf4ff 0%, rgba(234,244,255,0) 62%),
+    linear-gradient(180deg, #fcfdff 0%, #f7fbff 100%);
   color: var(--ink) !important;
 }
 .stApp [data-testid="stAppViewContainer"],
@@ -70,7 +69,7 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
 }
 .stApp [data-testid="stSidebar"],
 .stApp [data-testid="stSidebarContent"] {
-  background: linear-gradient(180deg, #eef6ff 0%, #e4f0fb 100%) !important;
+  background: #ffffff !important;
   border-right: 1px solid #b7cde8;
 }
 .block-container { padding-top: 1.2rem; max-width: 1200px; }
@@ -109,26 +108,26 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
   margin-bottom: .9rem;
 }
 .mc-front-card {
-  background: linear-gradient(180deg, #f1f8ff 0%, #e5f0fb 100%);
+  background: #ffffff;
   border: 1px solid #c2d7ef;
   border-radius: 14px;
   padding: .85rem .95rem;
-  box-shadow: 0 6px 16px rgba(45, 89, 130, .08);
+  box-shadow: 0 6px 14px rgba(31, 56, 91, .06);
 }
 .mc-step-card {
-  background: linear-gradient(180deg, #f1f8ff 0%, #e5f0fb 100%);
+  background: #ffffff;
   border: 1px solid #b7cde8;
   border-radius: 14px;
   padding: .8rem .9rem;
-  box-shadow: 0 4px 12px rgba(45, 89, 130, .08);
+  box-shadow: 0 4px 10px rgba(31, 56, 91, .05);
   margin-bottom: .65rem;
 }
 .mc-step-card.step2 {
-  background: linear-gradient(180deg, #edf6ff 0%, #dfecf9 100%);
+  background: #ffffff;
   border-color: #b7cde8;
 }
 .mc-step-card.step3 {
-  background: linear-gradient(180deg, #edf6ff 0%, #dfecf9 100%);
+  background: #ffffff;
   border-color: #b7cde8;
 }
 .mc-front-card h4 {
@@ -156,7 +155,7 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
   object-fit: cover;
 }
 .mc-card {
-  background: linear-gradient(180deg, #f1f8ff 0%, #e5f0fb 100%);
+  background: #ffffff;
   border: 1px solid #b7cde8;
   border-radius: 14px;
   padding: .8rem 1rem;
@@ -179,20 +178,20 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
 }
 /* Strong, visible backgrounds for step expanders */
 div[data-testid="stExpander"] {
-  background: linear-gradient(180deg, #f1f8ff 0%, #e5f0fb 100%);
+  background: #ffffff;
   border: 1px solid #b7cde8;
   border-radius: 14px;
   padding: 4px 6px;
   margin-bottom: 10px;
 }
 div[data-testid="stExpander"] details > summary {
-  background: linear-gradient(180deg, #eaf4ff 0%, #dceafb 100%);
+  background: linear-gradient(180deg, #f2f8ff 0%, #e8f2ff 100%);
   border: 1px solid #b7cde8;
   border-radius: 10px;
   padding: .4rem .65rem;
 }
 div[data-testid="stExpander"] details > div {
-  background: rgba(242, 248, 255, 0.92);
+  background: #ffffff;
   border-radius: 10px;
   padding: .35rem .35rem .2rem .35rem;
 }
