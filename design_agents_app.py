@@ -68,23 +68,20 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
 .stApp [data-testid="stSidebar"] * {
   color: var(--ink) !important;
 }
-.mc-hero,
-.mc-hero * {
-  color: #ffffff !important;
-}
 .block-container { padding-top: 1.2rem; max-width: 1200px; }
 .mc-hero {
   background:
-    linear-gradient(135deg, rgba(30,40,70,.92) 0%, rgba(45,84,96,.92) 45%, rgba(214,122,61,.88) 100%),
+    linear-gradient(135deg, rgba(255,255,255,.96) 0%, rgba(247,241,232,.96) 48%, rgba(238,226,208,.96) 100%),
     url('https://images.unsplash.com/photo-1616594039964-3dd9f9f142c0?auto=format&fit=crop&w=1200&q=60');
   background-size: cover;
   border-radius: 24px;
   padding: 1.6rem 1.5rem;
   margin-bottom: 1rem;
   box-shadow: 0 12px 30px rgba(21,31,58,.18);
+  border: 1px solid #e5d9c8;
 }
-.mc-title { color: #ffffff; font-size: 2.2rem; font-weight: 700; margin: 0; letter-spacing: .2px; }
-.mc-sub { color: #e7eefb; margin-top: .35rem; max-width: 700px; }
+.mc-title { color: #1f2a3d; font-size: 2.2rem; font-weight: 700; margin: 0; letter-spacing: .2px; }
+.mc-sub { color: #4b5a69; margin-top: .35rem; max-width: 700px; }
 .mc-kpis {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -92,10 +89,10 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
   margin-top: 1rem;
 }
 .mc-kpi {
-  background: rgba(255,255,255,.16);
-  border: 1px solid rgba(255,255,255,.36);
+  background: rgba(255,255,255,.84);
+  border: 1px solid #e6dbc8;
   border-radius: 12px;
-  color: #fff;
+  color: #1f2a3d;
   padding: .55rem .65rem;
 }
 .mc-kpi .v { font-size: 1.05rem; font-weight: 700; line-height: 1.2; }
@@ -158,6 +155,13 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
   border-radius: 8px;
   padding: .55rem .75rem;
   margin-bottom: .5rem;
+}
+.mc-prompt-focus {
+  background: #fffdf8;
+  border: 2px solid #f0c792;
+  border-radius: 12px;
+  padding: .75rem .85rem;
+  box-shadow: 0 6px 16px rgba(214,122,61,.12);
 }
 .mc-arch {
   background: #ffffff;
@@ -909,15 +913,19 @@ with tab_design:
     st.caption("Follow 3 simple steps: write request, upload images, generate.")
 
     if "quick_prompt_text" not in st.session_state:
-        st.session_state.quick_prompt_text = f"Design a {design_type.lower()} living room with warm lighting and practical storage."
+        st.session_state.quick_prompt_text = ""
 
     with st.expander("Step 1: Describe Your Design Goal", expanded=True):
+        st.markdown('<div class="mc-prompt-focus">', unsafe_allow_html=True)
+        st.markdown("**Type your request in this box**")
         q_prompt = st.text_area(
             "Describe what you want to change",
             key="quick_prompt_text",
             height=120,
             help="Type your request or choose an example and edit it.",
+            placeholder="Example: Redesign my room as a modern cozy space with warm lights, practical storage, and a neutral color palette.",
         )
+        st.markdown("</div>", unsafe_allow_html=True)
         st.caption("Try an example, then edit it:")
         ex_cols = st.columns(3)
         with ex_cols[0]:
