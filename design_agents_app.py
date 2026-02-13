@@ -275,6 +275,13 @@ def set_quick_prompt(text: str):
     st.session_state.quick_prompt_text = text
 
 
+def sync_creativity_from_quick():
+    q_val = float(st.session_state.get("quick_creativity_level", 0.0))
+    if q_val > 0:
+        st.session_state.creativity_enabled = True
+        st.session_state.creativity_level = q_val
+
+
 def get_image_vector_store(api_key: str) -> Chroma:
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", api_key=api_key)
     return Chroma(
@@ -987,14 +994,9 @@ with tab_design:
             float(st.session_state.quick_creativity_level),
             0.05,
             key="quick_creativity_level",
+            on_change=sync_creativity_from_quick,
         )
         st.caption("Lower creativity = practical designs. Higher creativity = bolder ideas.")
-    if q_creativity > 0 and (
-        (not st.session_state.creativity_enabled)
-        or abs(float(st.session_state.creativity_level) - float(q_creativity)) > 1e-9
-    ):
-        st.session_state.creativity_enabled = True
-        st.session_state.creativity_level = float(q_creativity)
 
     if st.button("Generate My Design", use_container_width=True):
         if not api_key:
@@ -1006,6 +1008,7 @@ with tab_design:
                 matches = []
                 image_cues = "no uploaded visual cues"
                 reference_image_bytes = None
+                failed_uploads = []
                 uploads_for_index = []
                 if room_upload is not None:
                     uploads_for_index.append(room_upload)
@@ -1025,12 +1028,22 @@ with tab_design:
                             reference_image_bytes = inspiration_uploads[0].getvalue()
 
                     vs = get_image_vector_store(api_key)
+                    indexed_any = False
                     for f in uploads_for_index:
-                        docs = chunk_image_to_documents(f.getvalue(), f.name, q_prompt, grid=3)
-                        ids = [str(uuid.uuid4()) for _ in docs]
-                        vs.add_documents(docs, ids=ids)
-                    matches = retrieve_image_matches(vs, q_prompt, top_k=8)
-                    image_cues = retrieve_image_cues(vs, q_prompt, top_k=6)
+                        try:
+                            docs = chunk_image_to_documents(f.getvalue(), f.name, q_prompt, grid=3)
+                            if not docs:
+                                failed_uploads.append(f"{f.name} (no readable content)")
+                                continue
+                            ids = [str(uuid.uuid4()) for _ in docs]
+                            vs.add_documents(docs, ids=ids)
+                            indexed_any = True
+                        except Exception as file_exc:
+                            failed_uploads.append(f"{f.name} ({str(file_exc)[:80]})")
+                            continue
+                    if indexed_any:
+                        matches = retrieve_image_matches(vs, q_prompt, top_k=8)
+                        image_cues = retrieve_image_cues(vs, q_prompt, top_k=6)
 
                 matched_image = matches[0]["image_name"] if matches else "none"
                 effective_lock_to_layout = (
@@ -1098,6 +1111,7 @@ with tab_design:
                 st.session_state.quick_context = {
                     "prompt": q_prompt,
                     "matches": matches,
+                    "failed_uploads": failed_uploads,
                     "matched_image": matched_image,
                     "image_cues": image_cues,
                     "style_dna": style_dna,
@@ -1225,6 +1239,9 @@ with tab_design:
             st.success(f"Saved {favorite} as favorite.")
 
         matches = qctx.get("matches", [])
+        failed_uploads = qctx.get("failed_uploads", [])
+        if failed_uploads:
+            st.warning("Some uploaded files were skipped:\n- " + "\n- ".join(failed_uploads))
         if matches:
             st.markdown("### Closest Match From Your Uploaded Images")
             st.dataframe(pd.DataFrame(matches), use_container_width=True)
@@ -1501,12 +1518,51 @@ with tab_diag:
 
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("**QAEval Log**")
+        st.markdown("**QAEval (Clear Evaluation View)**")
         if st.session_state.qa_log:
             df = pd.DataFrame(st.session_state.qa_log)
             total = len(df)
             correct = int((df["qaeval_grade"] == "CORRECT").sum())
-            st.metric("QAEval Accuracy", f"{(correct / total * 100):.2f}%")
+            incorrect = total - correct
+            pass_rate = (correct / total * 100) if total else 0.0
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Pass Rate", f"{pass_rate:.2f}%")
+            m2.metric("Passed", correct)
+            m3.metric("Failed", incorrect)
+
+            view_df = df.copy()
+            view_df["evaluation_result"] = view_df["qaeval_grade"]
+            view_df["expected_answer"] = view_df["reference"].astype(str).str.slice(0, 240)
+            view_df["model_answer"] = view_df["prediction"].astype(str).str.slice(0, 240)
+            view_df["why"] = view_df["qaeval_reason"].astype(str).str.slice(0, 240)
+
+            def _confidence(reason: str) -> str:
+                r = (reason or "").lower()
+                if any(x in r for x in ["uncertain", "partially", "missing", "not enough"]):
+                    return "Low"
+                if any(x in r for x in ["clearly", "strong", "well aligned", "matches"]):
+                    return "High"
+                return "Medium"
+
+            view_df["confidence"] = view_df["why"].apply(_confidence)
+            show_failed_only = st.checkbox("Show failed evaluations only", value=False)
+            if show_failed_only:
+                view_df = view_df[view_df["evaluation_result"] != "CORRECT"]
+
+            st.caption("Each row shows: user question, expected answer, model answer, evaluation result, confidence, and why.")
+            st.dataframe(
+                view_df[
+                    [
+                        "question",
+                        "expected_answer",
+                        "model_answer",
+                        "evaluation_result",
+                        "confidence",
+                        "why",
+                    ]
+                ],
+                use_container_width=True,
+            )
             if {"style_agent_score", "retail_agent_score", "moodboard_agent_score", "orchestrator_score"}.issubset(df.columns):
                 rank_rows = [
                     {"agent": "orchestrator", "avg_score": float(df["orchestrator_score"].mean())},
@@ -1519,7 +1575,6 @@ with tab_diag:
                 rank_df.index.name = "rank"
                 st.markdown("**Agent Ranking (Avg Score /10)**")
                 st.dataframe(rank_df, use_container_width=True)
-            st.dataframe(df, use_container_width=True)
     with c2:
         st.markdown("**MCP Trace Panel**")
         if st.session_state.mcp_trace:
