@@ -172,6 +172,25 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
   padding: .55rem .75rem;
   margin-bottom: .5rem;
 }
+/* Strong, visible backgrounds for step expanders */
+div[data-testid="stExpander"] {
+  background: linear-gradient(180deg, #f8efe2 0%, #efe1cc 100%);
+  border: 1px solid #d8be97;
+  border-radius: 14px;
+  padding: 4px 6px;
+  margin-bottom: 10px;
+}
+div[data-testid="stExpander"] details > summary {
+  background: linear-gradient(180deg, #e9d0ae 0%, #dfc19a 100%);
+  border: 1px solid #cfae81;
+  border-radius: 10px;
+  padding: .4rem .65rem;
+}
+div[data-testid="stExpander"] details > div {
+  background: rgba(255, 249, 238, 0.9);
+  border-radius: 10px;
+  padding: .35rem .35rem .2rem .35rem;
+}
 .mc-arch {
   background: #ffffff;
   border: 1px solid #e6dbc8;
