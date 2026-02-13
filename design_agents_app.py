@@ -110,6 +110,14 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
   padding: .85rem .95rem;
   box-shadow: 0 6px 16px rgba(40,48,67,.06);
 }
+.mc-step-card {
+  background: linear-gradient(180deg, #fffdf8 0%, #faf4e9 100%);
+  border: 1px solid #ecdcc3;
+  border-radius: 14px;
+  padding: .8rem .9rem;
+  box-shadow: 0 4px 12px rgba(40,48,67,.05);
+  margin-bottom: .65rem;
+}
 .mc-front-card h4 {
   margin: .1rem 0 .35rem 0;
   color: var(--ink);
@@ -155,13 +163,6 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
   border-radius: 8px;
   padding: .55rem .75rem;
   margin-bottom: .5rem;
-}
-.mc-prompt-focus {
-  background: #fffdf8;
-  border: 2px solid #f0c792;
-  border-radius: 12px;
-  padding: .75rem .85rem;
-  box-shadow: 0 6px 16px rgba(214,122,61,.12);
 }
 .mc-arch {
   background: #ffffff;
@@ -923,8 +924,8 @@ with tab_design:
         st.session_state.quick_prompt_text = ""
 
     with st.expander("Step 1: Describe Your Design Goal", expanded=True):
-        st.markdown('<div class="mc-prompt-focus">', unsafe_allow_html=True)
-        st.markdown("**Type your request in this box**")
+        st.markdown('<div class="mc-step-card">', unsafe_allow_html=True)
+        st.markdown("**Step 1: Type your design request below**")
         q_prompt = st.text_area(
             "Describe what you want to change",
             key="quick_prompt_text",
