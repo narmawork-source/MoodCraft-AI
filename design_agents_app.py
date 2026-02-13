@@ -71,14 +71,14 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
 .block-container { padding-top: 1.2rem; max-width: 1200px; }
 .mc-hero {
   background:
-    linear-gradient(135deg, rgba(255,255,255,.96) 0%, rgba(247,241,232,.96) 48%, rgba(238,226,208,.96) 100%),
+    linear-gradient(135deg, rgba(235,245,255,.96) 0%, rgba(221,236,252,.96) 48%, rgba(207,226,246,.96) 100%),
     url('https://images.unsplash.com/photo-1616594039964-3dd9f9f142c0?auto=format&fit=crop&w=1200&q=60');
   background-size: cover;
   border-radius: 24px;
   padding: 1.6rem 1.5rem;
   margin-bottom: 1rem;
   box-shadow: 0 12px 30px rgba(21,31,58,.18);
-  border: 1px solid #e5d9c8;
+  border: 1px solid #b7cde8;
 }
 .mc-title { color: #1f2a3d; font-size: 2.2rem; font-weight: 700; margin: 0; letter-spacing: .2px; }
 .mc-sub { color: #4b5a69; margin-top: .35rem; max-width: 700px; }
@@ -89,8 +89,8 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
   margin-top: 1rem;
 }
 .mc-kpi {
-  background: rgba(255,255,255,.84);
-  border: 1px solid #e6dbc8;
+  background: rgba(245, 251, 255, .92);
+  border: 1px solid #bcd0ea;
   border-radius: 12px;
   color: #1f2a3d;
   padding: .55rem .65rem;
@@ -104,11 +104,11 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
   margin-bottom: .9rem;
 }
 .mc-front-card {
-  background: linear-gradient(180deg, #fffaf2 0%, #f8eee1 100%);
-  border: 1px solid #e2cfb3;
+  background: linear-gradient(180deg, #f1f8ff 0%, #e5f0fb 100%);
+  border: 1px solid #c2d7ef;
   border-radius: 14px;
   padding: .85rem .95rem;
-  box-shadow: 0 6px 16px rgba(94,74,45,.08);
+  box-shadow: 0 6px 16px rgba(45, 89, 130, .08);
 }
 .mc-step-card {
   background: linear-gradient(180deg, #fff8ef 0%, #f9ede0 100%);
@@ -174,8 +174,8 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
 }
 /* Strong, visible backgrounds for step expanders */
 div[data-testid="stExpander"] {
-  background: linear-gradient(180deg, #f8efe2 0%, #efe1cc 100%);
-  border: 1px solid #d8be97;
+  background: linear-gradient(180deg, #f8f4ec 0%, #eee6d8 100%);
+  border: 1px solid #d8c7a9;
   border-radius: 14px;
   padding: 4px 6px;
   margin-bottom: 10px;
