@@ -9,6 +9,9 @@ from datetime import datetime
 from io import BytesIO
 from typing import Any
 
+# Avoid protobuf C-extension/runtime mismatch issues on some cloud builds.
+os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
+
 import pandas as pd
 import streamlit as st
 from PIL import Image
